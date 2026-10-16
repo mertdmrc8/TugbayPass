@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -45,7 +45,220 @@ public sealed class VaultEntry
 }
 public sealed class KdfInfo { public string name { get; set; } public string hash { get; set; } public int iterations { get; set; } public string salt { get; set; } }
 public sealed class CipherInfo { public string name { get; set; } public string iv { get; set; } public string ciphertext { get; set; } public string mac { get; set; } }
-public sealed class VaultEnvelope { public string format { get; set; } public int version { get; set; } public KdfInfo kdf { get; set; } public CipherInfo cRecent.Click += delegate { RecentVaultChoice choice = recentVaultBox.SelectedItem as RecentVaultChoice; if (choice != null) OpenVault(choice.Path); };
+public sealed class VaultEnvelope { public string format { get; set; } public int version { get; set; } public KdfInfo kdf { get; set; } public CipherInfo cipher { get; set; } }
+
+internal static class VaultCrypto
+{
+    public const int Iterations = 600000;
+    public const int PinIterations = 120000;
+    private static readonly byte[] Prefix = Encoding.UTF8.GetBytes("kasam-vault|1|PBKDF2-HMAC-SHA-256|");
+
+    public static byte[] RandomBytes(int count)
+    {
+        byte[] bytes = new byte[count];
+        using (RandomNumberGenerator rng = RandomNumberGenerator.Create()) rng.GetBytes(bytes);
+        return bytes;
+    }
+
+    public static byte[] DeriveKey(string password, byte[] salt, int iterations)
+    {
+        using (Rfc2898DeriveBytes kdf = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256))
+            return kdf.GetBytes(64);
+    }
+
+    private static byte[] AuthData(byte[] salt, byte[] iv, byte[] cipher, int iterations)
+    {
+        byte[] header = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(Prefix) + iterations.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|AES-256-CBC-HMAC-SHA-256|");
+        byte[] all = new byte[header.Length + salt.Length + iv.Length + cipher.Length];
+        Buffer.BlockCopy(header, 0, all, 0, header.Length);
+        Buffer.BlockCopy(salt, 0, all, header.Length, salt.Length);
+        Buffer.BlockCopy(iv, 0, all, header.Length + salt.Length, iv.Length);
+        Buffer.BlockCopy(cipher, 0, all, header.Length + salt.Length + iv.Length, cipher.Length);
+        return all;
+    }
+
+    public static string Encrypt(byte[] key, byte[] salt, byte[] plaintext)
+    {
+        byte[] iv = RandomBytes(16), aesKey = new byte[32], macKey = new byte[32], ciphertext, mac;
+        Buffer.BlockCopy(key, 0, aesKey, 0, 32); Buffer.BlockCopy(key, 32, macKey, 0, 32);
+        using (Aes aes = Aes.Create())
+        {
+            aes.KeySize = 256; aes.BlockSize = 128; aes.Mode = CipherMode.CBC; aes.Padding = PaddingMode.PKCS7; aes.Key = aesKey; aes.IV = iv;
+            using (ICryptoTransform enc = aes.CreateEncryptor()) ciphertext = enc.TransformFinalBlock(plaintext, 0, plaintext.Length);
+        }
+        using (HMACSHA256 hmac = new HMACSHA256(macKey)) mac = hmac.ComputeHash(AuthData(salt, iv, ciphertext, Iterations));
+        VaultEnvelope envelope = new VaultEnvelope {
+            format = "kasam-vault", version = 1,
+            kdf = new KdfInfo { name = "PBKDF2-HMAC-SHA-256", hash = "SHA-256", iterations = Iterations, salt = Convert.ToBase64String(salt) },
+            cipher = new CipherInfo { name = "AES-256-CBC-HMAC-SHA-256", iv = Convert.ToBase64String(iv), ciphertext = Convert.ToBase64String(ciphertext), mac = Convert.ToBase64String(mac) }
+        };
+        JavaScriptSerializer json = new JavaScriptSerializer(); json.MaxJsonLength = 50 * 1024 * 1024;
+        Array.Clear(aesKey, 0, aesKey.Length); Array.Clear(macKey, 0, macKey.Length);
+        return json.Serialize(envelope);
+    }
+
+    public static byte[] Decrypt(byte[] key, byte[] salt, byte[] iv, byte[] ciphertext, byte[] mac, int iterations)
+    {
+        byte[] aesKey = new byte[32], macKey = new byte[32], expected;
+        Buffer.BlockCopy(key, 0, aesKey, 0, 32); Buffer.BlockCopy(key, 32, macKey, 0, 32);
+        using (HMACSHA256 hmac = new HMACSHA256(macKey)) expected = hmac.ComputeHash(AuthData(salt, iv, ciphertext, iterations));
+        int mismatch = expected.Length ^ mac.Length;
+        for (int i = 0; i < Math.Min(expected.Length, mac.Length); i++) mismatch |= expected[i] ^ mac[i];
+        Array.Clear(macKey, 0, macKey.Length);
+        if (mismatch != 0) { Array.Clear(aesKey, 0, aesKey.Length); throw new CryptographicException("Kasa doğrulanamadı."); }
+        using (Aes aes = Aes.Create())
+        {
+            aes.KeySize = 256; aes.BlockSize = 128; aes.Mode = CipherMode.CBC; aes.Padding = PaddingMode.PKCS7; aes.Key = aesKey; aes.IV = iv;
+            using (ICryptoTransform dec = aes.CreateDecryptor())
+            {
+                byte[] plain = dec.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
+                Array.Clear(aesKey, 0, aesKey.Length); return plain;
+            }
+        }
+    }
+}
+
+internal static class UITheme
+{
+    public static bool Dark;
+    public static readonly Color LightCanvas = Color.FromArgb(241, 244, 250);
+    public static readonly Color LightSurface = Color.White;
+    public static readonly Color LightText = Color.FromArgb(35, 43, 67);
+    public static readonly Color LightMuted = Color.FromArgb(105, 114, 137);
+    public static readonly Color DarkCanvas = Color.FromArgb(20, 26, 41);
+    public static readonly Color DarkSurface = Color.FromArgb(31, 39, 58);
+    public static readonly Color DarkInput = Color.FromArgb(24, 31, 48);
+    public static readonly Color DarkText = Color.FromArgb(236, 240, 250);
+    public static readonly Color DarkMuted = Color.FromArgb(177, 187, 207);
+    public static Color Canvas { get { return Dark ? DarkCanvas : LightCanvas; } }
+    public static Color Surface { get { return Dark ? DarkSurface : LightSurface; } }
+    public static Color Input { get { return Dark ? DarkInput : Color.FromArgb(250, 251, 253); } }
+    public static Color Text { get { return Dark ? DarkText : LightText; } }
+    public static Color Muted { get { return Dark ? DarkMuted : LightMuted; } }
+    public static Color Border { get { return Dark ? Color.FromArgb(61, 72, 95) : Color.FromArgb(218, 224, 236); } }
+    public static Color Hover { get { return Dark ? Color.FromArgb(48, 59, 82) : Color.FromArgb(239, 242, 249); } }
+
+    public static void Apply(Control root)
+    {
+        if (root == null) return;
+        Form form = root as Form;
+        if (form != null) form.BackColor = Canvas;
+        else if (root is Panel || root is TableLayoutPanel || root is FlowLayoutPanel || root is SplitContainer)
+            root.BackColor = (root.Tag as string) == "canvas" ? Canvas : Surface;
+        else if (root is CheckBox || root is RadioButton || root is GroupBox)
+        { root.BackColor = Surface; root.ForeColor = Text; }
+        else if (root is TextBox || root is ComboBox)
+        { root.BackColor = Input; root.ForeColor = Text; }
+        else if (root is ListBox)
+        { root.BackColor = Surface; root.ForeColor = Text; }
+        else if (root is Label)
+        {
+            string role = root.Tag as string;
+            root.ForeColor = role == "muted" ? Muted : role == "accent" ? Color.FromArgb(83, 196, 176) : Text;
+        }
+        else if (root is Button)
+        {
+            Button button = (Button)root;
+            bool primary = (root.Tag as string) == "primary";
+            button.BackColor = primary ? Color.FromArgb(65, 91, 220) : Surface;
+            button.ForeColor = primary ? Color.White : Text;
+            button.FlatAppearance.BorderColor = Border;
+            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(79, 105, 235) : Hover;
+        }
+        foreach (Control child in root.Controls) Apply(child);
+    }
+}
+
+internal sealed class KasamForm : Form
+{
+    private const string AppVersion = "1.3.2";
+    private const string UpdateInfoUrl = "https://raw.githubusercontent.com/mertdmrc8/TugbayPass/main/update.json";
+    private static readonly Color Green = Color.FromArgb(65, 91, 220);
+    private static readonly Color Ink = UITheme.LightText;
+    private static readonly Color Muted = UITheme.LightMuted;
+    private static readonly Color Canvas = UITheme.LightCanvas;
+    private static readonly Font EntryTitleFont = new Font("Segoe UI", 10, FontStyle.Bold);
+    private static readonly Font EntryUserFont = new Font("Segoe UI", 9, FontStyle.Bold);
+    private List<VaultEntry> entries = new List<VaultEntry>();
+    private byte[] key, salt;
+    private string vaultPath;
+    private bool dirty, revealed;
+    private bool darkTheme;
+    private bool startupUpdateChecked;
+    private UpdateInfo pendingAutomaticUpdate;
+    private TextBox searchBox, usernameBox, passwordBox, urlBox, notesBox, systemBox;
+    private ComboBox systemFilterBox, recentVaultBox;
+    private List<string> recentVaults = new List<string>();
+    private List<PinVaultRecord> pinVaults = new List<PinVaultRecord>();
+    private ListBox entryList;
+    private Label titleLabel, statusLabel, fileLabel, countLabel;
+    private Button editButton, deleteButton, revealButton, copyButton;
+    private Button copySystemButton, copyUsernameButton, copyUrlButton, copyNotesButton, copyTitleButton;
+    private Panel body;
+
+    public KasamForm()
+    {
+        Text = "TugbayPass — Şifre Kasası"; StartPosition = FormStartPosition.CenterScreen;
+        Rectangle workArea = Screen.PrimaryScreen.WorkingArea;
+        int initialWidth = Math.Min(1180, Math.Max(850, workArea.Width - 24));
+        int initialHeight = Math.Min(790, Math.Max(600, workArea.Height - 24));
+        Size = new Size(initialWidth, initialHeight); MinimumSize = new Size(Math.Min(1000, initialWidth), Math.Min(650, initialHeight)); BackColor = Canvas;
+        Font = new Font("Segoe UI", 9); FormClosing += OnClosing;
+        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+        LoadSettings();
+        UITheme.Dark = darkTheme;
+        ShowWelcome();
+        Activated += delegate { if (pendingAutomaticUpdate != null) { UpdateInfo pending = pendingAutomaticUpdate; pendingAutomaticUpdate = null; OfferUpdate(pending); } };
+        Shown += delegate
+        {
+            if (recentVaults.Count > 0 && File.Exists(recentVaults[0]))
+                BeginInvoke((MethodInvoker)delegate { if (!IsDisposed && key == null) OpenVault(recentVaults[0]); CheckForUpdatesOnStartup(); });
+            else BeginInvoke((MethodInvoker)CheckForUpdatesOnStartup);
+        };
+    }
+
+    private Button MakeButton(string text, int width, bool primary)
+    {
+        Button b = new Button(); b.Text = text; b.Width = width; b.Height = 40; b.FlatStyle = FlatStyle.Flat; b.Cursor = Cursors.Hand; b.Tag = primary ? "primary" : "button";
+        b.FlatAppearance.BorderColor = Color.FromArgb(218, 226, 229); b.FlatAppearance.BorderSize = primary ? 0 : 1;
+        b.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(0, 121, 107) : Color.FromArgb(235, 242, 243);
+        b.FlatAppearance.MouseDownBackColor = Color.FromArgb(0, 77, 64); b.BackColor = primary ? Green : Color.White;
+        b.ForeColor = primary ? Color.White : Ink; b.Font = new Font("Segoe UI Semibold", 9); b.Margin = new Padding(3, 0, 3, 0); return b;
+    }
+
+    private Label MakeLabel(string text, int size, bool bold, Color color)
+    {
+        Label l = new Label(); l.Text = text; l.AutoSize = true; l.ForeColor = color; l.Tag = color == Muted ? "muted" : "label";
+        l.Font = new Font(bold ? "Segoe UI Semibold" : "Segoe UI", size); return l;
+    }
+
+    private void ShowWelcome()
+    {
+        Controls.Clear(); body = null;
+        Panel p = new Panel(); p.Dock = DockStyle.Fill; p.BackColor = Canvas; p.Tag = "canvas"; Controls.Add(p);
+        Panel top = new Panel { Dock = DockStyle.Top, Height = 76, BackColor = UITheme.Surface, Tag = "surface" }; p.Controls.Add(top);
+        BrandMark brandMark = new BrandMark(); brandMark.Location = new Point(28, 20); top.Controls.Add(brandMark);
+        Label brand = MakeLabel("TugbayPass", 19, true, Ink); brand.Location = new Point(76, 13); top.Controls.Add(brand);
+        Label version = MakeLabel("ŞİFRE KASASI  ·  v" + AppVersion, 9, true, Muted); version.Location = new Point(78, 41); top.Controls.Add(version);
+        Button theme = MakeButton(darkTheme ? "☀  Açık tema" : "☾  Koyu tema", 132, false); theme.Location = new Point(0, 18); theme.Anchor = AnchorStyles.Top | AnchorStyles.Right; theme.Left = top.ClientSize.Width - theme.Width - 24; top.Controls.Add(theme);
+        top.Resize += delegate { theme.Left = Math.Max(12, top.ClientSize.Width - theme.Width - 24); };
+        Panel card = new Panel { Location = new Point(40, 118), Size = new Size(Math.Min(800, Math.Max(400, p.ClientSize.Width - 80)), 430), Anchor = AnchorStyles.Top | AnchorStyles.Left, BackColor = UITheme.Surface, Tag = "surface" }; p.Controls.Add(card);
+        Label hero = MakeLabel("Şifreleriniz tek yerde,\r\nkontrolünüz sizde.", 27, true, Ink); hero.Location = new Point(34, 32); hero.Size = new Size(card.Width - 68, 88); hero.AutoSize = false; card.Controls.Add(hero);
+        Label sub = MakeLabel("Hesap bilgilerinizi bu bilgisayarda şifreli bir kasada saklayın.", 11, false, Muted); sub.Location = new Point(37, 133); sub.Size = new Size(card.Width - 70, 32); sub.AutoSize = false; card.Controls.Add(sub);
+        FlowLayoutPanel choices = new FlowLayoutPanel { Location = new Point(34, 185), Size = new Size(card.Width - 68, 62), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, WrapContents = false, AutoScroll = true, BackColor = UITheme.Surface, Tag = "surface" }; card.Controls.Add(choices);
+        Button create = MakeButton("Yeni kasa oluştur", 238, true); create.Height = 50; create.Font = new Font("Segoe UI Semibold", 11); choices.Controls.Add(create);
+        Button open = MakeButton("Farklı kasa dosyası seç", 238, false); open.Height = 50; open.Font = new Font("Segoe UI Semibold", 11); choices.Controls.Add(open);
+        Label recentLabel = MakeLabel("SON KULLANILAN KASALAR", 9, true, Muted); recentLabel.Location = new Point(37, 277); card.Controls.Add(recentLabel);
+        recentVaultBox = new ComboBox(); recentVaultBox.Location = new Point(34, 305); recentVaultBox.Size = new Size(Math.Max(160, card.Width - 220), 38); recentVaultBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; recentVaultBox.DropDownStyle = ComboBoxStyle.DropDownList; recentVaultBox.Font = new Font("Segoe UI", 10); card.Controls.Add(recentVaultBox);
+        Button openRecent = MakeButton("Seçili kasayı aç", 160, true); openRecent.Location = new Point(card.Width - 194, 302); openRecent.Anchor = AnchorStyles.Top | AnchorStyles.Right; card.Controls.Add(openRecent);
+        RefreshRecentVaults();
+        openRecent.Enabled = recentVaultBox.Items.Count > 0;
+        Label note = MakeLabel("Kasa dosyası seçimi hatırlanır; ana parolanız saklanmaz. Yerel PIN ile hızlı açılış kullanabilirsiniz.", 9, false, Muted); note.Location = new Point(37, 362); note.Size = new Size(card.Width - 70, 42); note.AutoSize = false; card.Controls.Add(note);
+        card.Resize += delegate { hero.Width = card.ClientSize.Width - 68; sub.Width = card.ClientSize.Width - 70; choices.Width = card.ClientSize.Width - 68; recentVaultBox.Width = Math.Max(160, card.ClientSize.Width - 220); openRecent.Left = card.ClientSize.Width - 194; note.Width = card.ClientSize.Width - 70; };
+        p.Resize += delegate { card.Width = Math.Min(800, Math.Max(400, p.ClientSize.Width - 80)); card.Left = Math.Max(24, (p.ClientSize.Width - card.Width) / 2); };
+        create.Click += delegate { CreateVault(); };
+        open.Click += delegate { OpenVault(); };
+        openRecent.Click += delegate { RecentVaultChoice choice = recentVaultBox.SelectedItem as RecentVaultChoice; if (choice != null) OpenVault(choice.Path); };
         theme.Click += delegate { darkTheme = !darkTheme; UITheme.Dark = darkTheme; SaveSettings(); ShowWelcome(); };
         UITheme.Apply(this);
     }
@@ -333,9 +546,10 @@ public sealed class VaultEnvelope { public string format { get; set; } public in
         header.Paint += delegate(object sender, PaintEventArgs e) { using (Pen pen = new Pen(UITheme.Dark ? Color.FromArgb(51, 62, 85) : Color.FromArgb(224, 229, 239))) e.Graphics.DrawLine(pen, 0, header.Height - 1, header.Width, header.Height - 1); };
         Label heading = MakeLabel("Şifre kasası", 19, true, Ink); heading.Location = new Point(22, 15); header.Controls.Add(heading);
         Label headingSub = MakeLabel("Hesaplarını görüntüle ve düzenle", 9, false, Muted); headingSub.Location = new Point(24, 46); header.Controls.Add(headingSub);
-        FlowLayoutPanel actions = new FlowLayoutPanel { Location = new Point(14, 72), Size = new Size(main.ClientSize.Width - 28, 44), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, AutoScroll = false, BackColor = UITheme.Surface, Tag = "surface", Padding = new Padding(0) }; header.Controls.Add(actions);
+        FlowLayoutPanel actions = new FlowLayoutPanel { Location = new Point(14, 72), Size = new Size(main.ClientSize.Width - 28, 44), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoScroll = true, BackColor = UITheme.Surface, Tag = "surface", Padding = new Padding(0) }; header.Controls.Add(actions);
         Button add = MakeButton("+ Yeni kayıt", 112, true), save = MakeButton("Kaydet", 92, false), changeMaster = MakeButton("Ana parola", 94, false), pinButton = MakeButton("PIN ayarı", 84, false), chooseVault = MakeButton("Kasa seç", 80, false), lockButton = MakeButton("Kilitle", 72, false), updateButton = MakeButton("Güncellemeler", 116, false);
-        Button themeButton = MakeButton(darkTheme ? "☀ Açık tema" : "☾ Koyu tema", 108, false); themeButton.Location = new Point(header.Width - 136, 17); themeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right; header.Controls.Add(themeButton);
+        Button themeButton = MakeButton(darkTheme ? "☀ Açık tema" : "☾ Koyu tema", 108, false); themeButton.Location = new Point(0, 17); themeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right; header.Controls.Add(themeButton);
+        header.Resize += delegate { themeButton.Left = Math.Max(12, header.ClientSize.Width - themeButton.Width - 18); };
         actions.Controls.AddRange(new Control[] { add, save, changeMaster, pinButton, chooseVault, lockButton, updateButton });
 
         Panel statusStrip = new Panel { Location = new Point(16, 128), Size = new Size(main.ClientSize.Width - 32, 30), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, BackColor = Canvas, Tag = "canvas" }; main.Controls.Add(statusStrip);
@@ -389,8 +603,8 @@ public sealed class VaultEnvelope { public string format { get; set; } public in
         copyUsernameButton.Click += delegate { CopyField(usernameBox.Text, "Kullanıcı adı / e-posta"); };
         copyUrlButton.Click += delegate { CopyField(urlBox.Text, "Web adresi"); };
         copyNotesButton.Click += delegate { CopyField(notesBox.Text, "Notlar"); };
-        split.Panel2.Resize += delegate { details.Width = split.Panel2.ClientSize.Width - 36; notesBox.Width = split.Panel2.ClientSize.Width - 36; copyNotesButton.Left = split.Panel2.ClientSize.Width - 108; };
-        main.Resize += delegate { actions.Width = main.ClientSize.Width - 28; statusStrip.Width = main.ClientSize.Width - 32; fileLabel.Width = statusStrip.Width - 230; split.Width = main.ClientSize.Width - 32; split.Height = main.ClientSize.Height - 204; };
+        split.Panel2.Resize += delegate { int panelWidth = split.Panel2.ClientSize.Width; details.Width = panelWidth - 36; notesBox.Width = panelWidth - 36; copyNotesButton.Left = panelWidth - 108; titleLabel.Width = Math.Max(80, panelWidth - 285); copyTitleButton.Left = panelWidth - 250; editButton.Left = panelWidth - 168; deleteButton.Left = panelWidth - 82; };
+        main.Resize += delegate { actions.Width = main.ClientSize.Width - 28; statusStrip.Width = main.ClientSize.Width - 32; fileLabel.Width = Math.Max(80, statusStrip.Width - 230); split.Width = main.ClientSize.Width - 32; split.Height = main.ClientSize.Height - 204; };
         UITheme.Apply(this);
         UpdateStatus(); RefreshSystemFilter(null); RefreshRecentVaults(); RefreshEntries(null); UpdateDetails();
     }
@@ -483,9 +697,16 @@ public sealed class VaultEnvelope { public string format { get; set; } public in
 
     private sealed class UpdateInfo { public string version { get; set; } public string setupUrl { get; set; } }
 
-    private void CheckForUpdates(Button button)
+    private void CheckForUpdatesOnStartup()
     {
-        button.Enabled = false; button.Text = "Denetleniyor…";
+        if (startupUpdateChecked || IsDisposed) return;
+        startupUpdateChecked = true;
+        CheckForUpdates(null, true);
+    }
+
+    private void CheckForUpdates(Button button, bool automatic = false)
+    {
+        if (button != null) { button.Enabled = false; button.Text = "Denetleniyor…"; }
         BackgroundWorker worker = new BackgroundWorker();
         worker.DoWork += delegate(object sender, DoWorkEventArgs e)
         {
@@ -502,16 +723,25 @@ public sealed class VaultEnvelope { public string format { get; set; } public in
         };
         worker.RunWorkerCompleted += delegate(object sender, RunWorkerCompletedEventArgs e)
         {
-            button.Enabled = true; button.Text = "Güncellemeleri denetle";
-            if (e.Error != null) { MessageBox.Show("Güncelleme denetlenemedi. İnternet bağlantınızı kontrol edin.\r\n\r\n" + e.Error.Message, "Kasam güncelleme", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (button != null && !button.IsDisposed) { button.Enabled = true; button.Text = "Güncellemeleri denetle"; }
+            if (IsDisposed) return;
+            if (e.Error != null) { if (!automatic) MessageBox.Show("Güncelleme denetlenemedi. İnternet bağlantınızı kontrol edin.\r\n\r\n" + e.Error.Message, "TugbayPass güncelleme", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             UpdateInfo info = (UpdateInfo)e.Result;
             Version current, latest;
-            if (!Version.TryParse(AppVersion, out current) || !Version.TryParse(info.version, out latest)) { MessageBox.Show("Sürüm bilgisi okunamadı.", "Kasam", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (latest <= current) { MessageBox.Show("Kasam güncel. (" + AppVersion + ")", "Kasam güncelleme", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
-            if (MessageBox.Show("Yeni sürüm bulundu: " + latest + "\r\nKurulum dosyası indirilsin mi? Kurulum sırasında hedef klasörü seçebilirsiniz.", "Kasam güncelleme", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
-            DownloadUpdate(info.setupUrl, latest.ToString());
+            if (!Version.TryParse(AppVersion, out current) || !Version.TryParse(info.version, out latest)) { if (!automatic) MessageBox.Show("Sürüm bilgisi okunamadı.", "TugbayPass", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (latest <= current) { if (!automatic) MessageBox.Show("TugbayPass güncel. (" + AppVersion + ")", "TugbayPass güncelleme", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            if (automatic && ActiveForm != this) { pendingAutomaticUpdate = info; return; }
+            OfferUpdate(info);
         };
         worker.RunWorkerAsync();
+    }
+
+    private void OfferUpdate(UpdateInfo info)
+    {
+        Version latest;
+        if (!Version.TryParse(info.version, out latest)) return;
+        if (MessageBox.Show("TugbayPass için yeni sürüm bulundu: " + latest + "\r\nKurulum dosyasını indirip şimdi başlatmak ister misiniz? Kurulum konumunu seçebilirsiniz.", "TugbayPass güncelleme", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+            DownloadUpdate(info.setupUrl, latest.ToString());
     }
 
     private void DownloadUpdate(string url, string version)
