@@ -590,6 +590,11 @@ internal sealed class KasamForm : Form
 
     private void DownloadUpdate(string url, string version)
     {
+        if (dirty)
+        {
+            MessageBox.Show("Güncellemeyi kurmadan önce kasadaki değişiklikleri kaydedin. Kaydettikten sonra güncellemeyi yeniden denetleyin.", "Kasam güncelleme", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
         try
         {
             ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
@@ -601,6 +606,7 @@ internal sealed class KasamForm : Form
             using (FileStream destination = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None)) source.CopyTo(destination);
             if (new FileInfo(target).Length < 50000) throw new InvalidDataException("İndirilen kurulum dosyası eksik görünüyor.");
             Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+            Close();
         }
         catch (Exception ex) { MessageBox.Show("Güncelleme indirilemedi veya başlatılamadı.\r\n\r\n" + ex.Message, "Kasam güncelleme", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
