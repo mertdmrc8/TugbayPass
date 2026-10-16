@@ -21,6 +21,7 @@ if errorlevel 1 (
 )
 if not exist "%~dp0dist" mkdir "%~dp0dist"
 copy /y "%~dp0Kasam-Setup-1.2.0.exe" "%~dp0dist\Kasam-Setup-1.2.0.exe" >nul
+copy /y "%~dp0Kasam.exe" "%~dp0dist\Kasam.exe" >nul
 copy /y "%~dp0update.json" "%~dp0dist\update.json" >nul
 echo Kasam.exe ve secilebilir kurulum konumuna sahip Kasam-Setup-1.2.0.exe olusturuldu.
 pause
