@@ -25,7 +25,7 @@ internal static class Program
 public sealed class VaultPayload { public List<VaultEntry> entries { get; set; } }
 public sealed class KasamSettings { public List<string> recentVaults { get; set; } public List<PinVaultRecord> pinVaults { get; set; } public bool darkTheme { get; set; } }
 public sealed class PinVaultRecord { public string path { get; set; } public string protectedData { get; set; } }
-public sealed class QuickUnlockData { public string pinSalt { get; set; } public string vaultSalt { get; set; } public string wrappedKey { get; set; } }
+public sealed class QuickUnlockData { public string pinSalt { get; set; } public int pinIterations { get; set; } public string vaultSalt { get; set; } public string wrappedKey { get; set; } }
 internal sealed class RecentVaultChoice
 {
     public string Path { get; private set; }
@@ -45,205 +45,7 @@ public sealed class VaultEntry
 }
 public sealed class KdfInfo { public string name { get; set; } public string hash { get; set; } public int iterations { get; set; } public string salt { get; set; } }
 public sealed class CipherInfo { public string name { get; set; } public string iv { get; set; } public string ciphertext { get; set; } public string mac { get; set; } }
-public sealed class VaultEnvelope { public string format { get; set; } public int version { get; set; } public KdfInfo kdf { get; set; } public CipherInfo cipher { get; set; } }
-
-internal static class VaultCrypto
-{
-    public const int Iterations = 600000;
-    private static readonly byte[] Prefix = Encoding.UTF8.GetBytes("kasam-vault|1|PBKDF2-HMAC-SHA-256|");
-
-    public static byte[] RandomBytes(int count)
-    {
-        byte[] bytes = new byte[count];
-        using (RandomNumberGenerator rng = RandomNumberGenerator.Create()) rng.GetBytes(bytes);
-        return bytes;
-    }
-
-    public static byte[] DeriveKey(string password, byte[] salt, int iterations)
-    {
-        using (Rfc2898DeriveBytes kdf = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256))
-            return kdf.GetBytes(64);
-    }
-
-    private static byte[] AuthData(byte[] salt, byte[] iv, byte[] cipher, int iterations)
-    {
-        byte[] header = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(Prefix) + iterations.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|AES-256-CBC-HMAC-SHA-256|");
-        byte[] all = new byte[header.Length + salt.Length + iv.Length + cipher.Length];
-        Buffer.BlockCopy(header, 0, all, 0, header.Length);
-        Buffer.BlockCopy(salt, 0, all, header.Length, salt.Length);
-        Buffer.BlockCopy(iv, 0, all, header.Length + salt.Length, iv.Length);
-        Buffer.BlockCopy(cipher, 0, all, header.Length + salt.Length + iv.Length, cipher.Length);
-        return all;
-    }
-
-    public static string Encrypt(byte[] key, byte[] salt, byte[] plaintext)
-    {
-        byte[] iv = RandomBytes(16), aesKey = new byte[32], macKey = new byte[32], ciphertext, mac;
-        Buffer.BlockCopy(key, 0, aesKey, 0, 32); Buffer.BlockCopy(key, 32, macKey, 0, 32);
-        using (Aes aes = Aes.Create())
-        {
-            aes.KeySize = 256; aes.BlockSize = 128; aes.Mode = CipherMode.CBC; aes.Padding = PaddingMode.PKCS7; aes.Key = aesKey; aes.IV = iv;
-            using (ICryptoTransform enc = aes.CreateEncryptor()) ciphertext = enc.TransformFinalBlock(plaintext, 0, plaintext.Length);
-        }
-        using (HMACSHA256 hmac = new HMACSHA256(macKey)) mac = hmac.ComputeHash(AuthData(salt, iv, ciphertext, Iterations));
-        VaultEnvelope envelope = new VaultEnvelope {
-            format = "kasam-vault", version = 1,
-            kdf = new KdfInfo { name = "PBKDF2-HMAC-SHA-256", hash = "SHA-256", iterations = Iterations, salt = Convert.ToBase64String(salt) },
-            cipher = new CipherInfo { name = "AES-256-CBC-HMAC-SHA-256", iv = Convert.ToBase64String(iv), ciphertext = Convert.ToBase64String(ciphertext), mac = Convert.ToBase64String(mac) }
-        };
-        JavaScriptSerializer json = new JavaScriptSerializer(); json.MaxJsonLength = 50 * 1024 * 1024;
-        Array.Clear(aesKey, 0, aesKey.Length); Array.Clear(macKey, 0, macKey.Length);
-        return json.Serialize(envelope);
-    }
-
-    public static byte[] Decrypt(byte[] key, byte[] salt, byte[] iv, byte[] ciphertext, byte[] mac, int iterations)
-    {
-        byte[] aesKey = new byte[32], macKey = new byte[32], expected;
-        Buffer.BlockCopy(key, 0, aesKey, 0, 32); Buffer.BlockCopy(key, 32, macKey, 0, 32);
-        using (HMACSHA256 hmac = new HMACSHA256(macKey)) expected = hmac.ComputeHash(AuthData(salt, iv, ciphertext, iterations));
-        int mismatch = expected.Length ^ mac.Length;
-        for (int i = 0; i < Math.Min(expected.Length, mac.Length); i++) mismatch |= expected[i] ^ mac[i];
-        Array.Clear(macKey, 0, macKey.Length);
-        if (mismatch != 0) { Array.Clear(aesKey, 0, aesKey.Length); throw new CryptographicException("Kasa doğrulanamadı."); }
-        using (Aes aes = Aes.Create())
-        {
-            aes.KeySize = 256; aes.BlockSize = 128; aes.Mode = CipherMode.CBC; aes.Padding = PaddingMode.PKCS7; aes.Key = aesKey; aes.IV = iv;
-            using (ICryptoTransform dec = aes.CreateDecryptor())
-            {
-                byte[] plain = dec.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
-                Array.Clear(aesKey, 0, aesKey.Length); return plain;
-            }
-        }
-    }
-}
-
-internal static class UITheme
-{
-    public static bool Dark;
-    public static readonly Color LightCanvas = Color.FromArgb(241, 244, 250);
-    public static readonly Color LightSurface = Color.White;
-    public static readonly Color LightText = Color.FromArgb(35, 43, 67);
-    public static readonly Color LightMuted = Color.FromArgb(105, 114, 137);
-    public static readonly Color DarkCanvas = Color.FromArgb(20, 26, 41);
-    public static readonly Color DarkSurface = Color.FromArgb(31, 39, 58);
-    public static readonly Color DarkInput = Color.FromArgb(24, 31, 48);
-    public static readonly Color DarkText = Color.FromArgb(236, 240, 250);
-    public static readonly Color DarkMuted = Color.FromArgb(177, 187, 207);
-    public static Color Canvas { get { return Dark ? DarkCanvas : LightCanvas; } }
-    public static Color Surface { get { return Dark ? DarkSurface : LightSurface; } }
-    public static Color Input { get { return Dark ? DarkInput : Color.FromArgb(250, 251, 253); } }
-    public static Color Text { get { return Dark ? DarkText : LightText; } }
-    public static Color Muted { get { return Dark ? DarkMuted : LightMuted; } }
-
-    public static void Apply(Control root)
-    {
-        if (root == null) return;
-        Form form = root as Form;
-        if (form != null) form.BackColor = Canvas;
-        else if (root is Panel || root is TableLayoutPanel || root is FlowLayoutPanel || root is SplitContainer)
-            root.BackColor = (root.Tag as string) == "canvas" ? Canvas : Surface;
-        else if (root is TextBox || root is ComboBox)
-        { root.BackColor = Input; root.ForeColor = Text; }
-        else if (root is ListBox)
-        { root.BackColor = Surface; root.ForeColor = Text; }
-        else if (root is Label)
-        {
-            string role = root.Tag as string;
-            root.ForeColor = role == "muted" ? Muted : role == "accent" ? Color.FromArgb(83, 196, 176) : Text;
-        }
-        else if (root is Button)
-        {
-            Button button = (Button)root;
-            bool primary = (root.Tag as string) == "primary";
-            button.BackColor = primary ? Color.FromArgb(65, 91, 220) : Surface;
-            button.ForeColor = primary ? Color.White : Text;
-            button.FlatAppearance.BorderColor = Dark ? Color.FromArgb(68, 80, 105) : Color.FromArgb(217, 223, 235);
-            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(79, 105, 235) : (Dark ? Color.FromArgb(48, 59, 82) : Color.FromArgb(239, 242, 249));
-        }
-        foreach (Control child in root.Controls) Apply(child);
-    }
-}
-
-internal sealed class KasamForm : Form
-{
-    private const string AppVersion = "1.3.0";
-    private const string UpdateInfoUrl = "https://raw.githubusercontent.com/mertdmrc8/TugbayPass/main/update.json";
-    private static readonly Color Green = Color.FromArgb(65, 91, 220);
-    private static readonly Color Ink = UITheme.LightText;
-    private static readonly Color Muted = UITheme.LightMuted;
-    private static readonly Color Canvas = UITheme.LightCanvas;
-    private static readonly Font EntryTitleFont = new Font("Segoe UI", 10, FontStyle.Bold);
-    private static readonly Font EntryUserFont = new Font("Segoe UI", 9, FontStyle.Bold);
-    private List<VaultEntry> entries = new List<VaultEntry>();
-    private byte[] key, salt;
-    private string vaultPath;
-    private bool dirty, revealed;
-    private bool darkTheme;
-    private TextBox searchBox, usernameBox, passwordBox, urlBox, notesBox, systemBox;
-    private ComboBox systemFilterBox, recentVaultBox;
-    private List<string> recentVaults = new List<string>();
-    private List<PinVaultRecord> pinVaults = new List<PinVaultRecord>();
-    private ListBox entryList;
-    private Label titleLabel, statusLabel, fileLabel, countLabel;
-    private Button editButton, deleteButton, revealButton, copyButton;
-    private Button copySystemButton, copyUsernameButton, copyUrlButton, copyNotesButton, copyTitleButton;
-    private Panel body;
-
-    public KasamForm()
-    {
-        Text = "TugbayPass — Şifre Kasası"; StartPosition = FormStartPosition.CenterScreen;
-        Size = new Size(1180, 790); MinimumSize = new Size(1000, 650); BackColor = Canvas;
-        Font = new Font("Segoe UI", 9); FormClosing += OnClosing;
-        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
-        LoadSettings();
-        UITheme.Dark = darkTheme;
-        ShowWelcome();
-        Shown += delegate
-        {
-            if (recentVaults.Count > 0 && File.Exists(recentVaults[0]))
-                BeginInvoke((MethodInvoker)delegate { if (!IsDisposed && key == null) OpenVault(recentVaults[0]); });
-        };
-    }
-
-    private Button MakeButton(string text, int width, bool primary)
-    {
-        Button b = new Button(); b.Text = text; b.Width = width; b.Height = 40; b.FlatStyle = FlatStyle.Flat; b.Cursor = Cursors.Hand; b.Tag = primary ? "primary" : "button";
-        b.FlatAppearance.BorderColor = Color.FromArgb(218, 226, 229); b.FlatAppearance.BorderSize = primary ? 0 : 1;
-        b.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(0, 121, 107) : Color.FromArgb(235, 242, 243);
-        b.FlatAppearance.MouseDownBackColor = Color.FromArgb(0, 77, 64); b.BackColor = primary ? Green : Color.White;
-        b.ForeColor = primary ? Color.White : Ink; b.Font = new Font("Segoe UI Semibold", 9); b.Margin = new Padding(3, 0, 3, 0); return b;
-    }
-
-    private Label MakeLabel(string text, int size, bool bold, Color color)
-    {
-        Label l = new Label(); l.Text = text; l.AutoSize = true; l.ForeColor = color; l.Tag = color == Muted ? "muted" : "label";
-        l.Font = new Font(bold ? "Segoe UI Semibold" : "Segoe UI", size); return l;
-    }
-
-    private void ShowWelcome()
-    {
-        Controls.Clear(); body = null;
-        Panel p = new Panel(); p.Dock = DockStyle.Fill; p.BackColor = Canvas; p.Tag = "canvas"; Controls.Add(p);
-        Panel top = new Panel { Dock = DockStyle.Top, Height = 76, BackColor = UITheme.Surface, Tag = "surface" }; p.Controls.Add(top);
-        BrandMark brandMark = new BrandMark(); brandMark.Location = new Point(28, 20); top.Controls.Add(brandMark);
-        Label brand = MakeLabel("TugbayPass", 19, true, Ink); brand.Location = new Point(76, 16); top.Controls.Add(brand);
-        Label version = MakeLabel("ŞİFRE KASASI  ·  v" + AppVersion, 9, true, Muted); version.Location = new Point(78, 43); top.Controls.Add(version);
-        Button theme = MakeButton(darkTheme ? "☀  Açık tema" : "☾  Koyu tema", 132, false); theme.Location = new Point(Width - 178, 19); theme.Anchor = AnchorStyles.Top | AnchorStyles.Right; top.Controls.Add(theme);
-        Panel card = new Panel { Location = new Point(40, 118), Size = new Size(Math.Min(800, p.ClientSize.Width - 80), 430), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, BackColor = UITheme.Surface, Tag = "surface" }; p.Controls.Add(card);
-        Label hero = MakeLabel("Şifreleriniz tek yerde,\r\nkontrolünüz sizde.", 27, true, Ink); hero.Location = new Point(34, 32); hero.Size = new Size(card.Width - 68, 88); hero.AutoSize = false; card.Controls.Add(hero);
-        Label sub = MakeLabel("Hesap bilgilerinizi bu bilgisayarda şifreli bir kasada saklayın.", 11, false, Muted); sub.Location = new Point(37, 133); sub.Size = new Size(card.Width - 70, 32); sub.AutoSize = false; card.Controls.Add(sub);
-        FlowLayoutPanel choices = new FlowLayoutPanel { Location = new Point(34, 185), Size = new Size(card.Width - 68, 62), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, WrapContents = true, BackColor = UITheme.Surface, Tag = "surface" }; card.Controls.Add(choices);
-        Button create = MakeButton("Yeni kasa oluştur", 238, true); create.Height = 50; create.Font = new Font("Segoe UI Semibold", 11); choices.Controls.Add(create);
-        Button open = MakeButton("Farklı kasa dosyası seç", 238, false); open.Height = 50; open.Font = new Font("Segoe UI Semibold", 11); choices.Controls.Add(open);
-        Label recentLabel = MakeLabel("SON KULLANILAN KASALAR", 9, true, Muted); recentLabel.Location = new Point(37, 277); card.Controls.Add(recentLabel);
-        recentVaultBox = new ComboBox(); recentVaultBox.Location = new Point(34, 305); recentVaultBox.Size = new Size(card.Width - 220, 38); recentVaultBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; recentVaultBox.DropDownStyle = ComboBoxStyle.DropDownList; recentVaultBox.Font = new Font("Segoe UI", 10); card.Controls.Add(recentVaultBox);
-        Button openRecent = MakeButton("Seçili kasayı aç", 160, true); openRecent.Location = new Point(card.Width - 178, 302); openRecent.Anchor = AnchorStyles.Top | AnchorStyles.Right; card.Controls.Add(openRecent);
-        RefreshRecentVaults();
-        openRecent.Enabled = recentVaultBox.Items.Count > 0;
-        Label note = MakeLabel("Kasa dosyası seçimi hatırlanır; ana parolanız saklanmaz. Yerel PIN ile hızlı açılış kullanabilirsiniz.", 9, false, Muted); note.Location = new Point(37, 362); note.Size = new Size(card.Width - 70, 42); note.AutoSize = false; card.Controls.Add(note);
-        create.Click += delegate { CreateVault(); };
-        open.Click += delegate { OpenVault(); };
-        openRecent.Click += delegate { RecentVaultChoice choice = recentVaultBox.SelectedItem as RecentVaultChoice; if (choice != null) OpenVault(choice.Path); };
+public sealed class VaultEnvelope { public string format { get; set; } public int version { get; set; } public KdfInfo kdf { get; set; } public CipherInfo cRecent.Click += delegate { RecentVaultChoice choice = recentVaultBox.SelectedItem as RecentVaultChoice; if (choice != null) OpenVault(choice.Path); };
         theme.Click += delegate { darkTheme = !darkTheme; UITheme.Dark = darkTheme; SaveSettings(); ShowWelcome(); };
         UITheme.Apply(this);
     }
@@ -357,6 +159,7 @@ internal sealed class KasamForm : Form
             if (quickData != null)
             {
                 int failures = 0, quickResult = 0; // 1 = opened, 2 = use master, 3 = cancelled
+                string successfulPin = null;
                 while (failures < 5 && quickResult == 0)
                 {
                     using (PinUnlockDialog pinDialog = new PinUnlockDialog())
@@ -368,7 +171,8 @@ internal sealed class KasamForm : Form
                         try
                         {
                             byte[] pinSalt = Convert.FromBase64String(quickData.pinSalt);
-                            byte[] pinKey = VaultCrypto.DeriveKey(pinDialog.Pin, pinSalt, VaultCrypto.Iterations);
+                            int pinIterations = quickData.pinIterations > 0 ? quickData.pinIterations : VaultCrypto.Iterations;
+                            byte[] pinKey = VaultCrypto.DeriveKey(pinDialog.Pin, pinSalt, pinIterations);
                             VaultEnvelope wrapped = json.Deserialize<VaultEnvelope>(quickData.wrappedKey);
                             if (wrapped == null || wrapped.kdf == null || wrapped.cipher == null) throw new CryptographicException("PIN kaydı bozuk.");
                             byte[] wrappedSalt = Convert.FromBase64String(wrapped.kdf.salt);
@@ -379,6 +183,7 @@ internal sealed class KasamForm : Form
                             Array.Clear(pinKey, 0, pinKey.Length);
                             if (candidateKey.Length != 64) throw new CryptographicException("PIN anahtarı geçersiz.");
                             plaintext = VaultCrypto.Decrypt(candidateKey, fileSalt, iv, cipher, mac, iterations);
+                            successfulPin = pinDialog.Pin;
                             quickResult = 1;
                         }
                         catch
@@ -395,6 +200,8 @@ internal sealed class KasamForm : Form
                         }
                     }
                 }
+                if (quickResult == 1 && quickData.pinIterations != VaultCrypto.PinIterations)
+                    MigratePinIterations(path, quickData, successfulPin, candidateKey);
                 if (quickResult == 3) return;
                 if (quickResult == 2) { if (candidateKey != null) Array.Clear(candidateKey, 0, candidateKey.Length); candidateKey = null; }
             }
@@ -459,6 +266,20 @@ internal sealed class KasamForm : Form
         catch { return false; }
     }
 
+    private void MigratePinIterations(string path, QuickUnlockData data, string pin, byte[] vaultKey)
+    {
+        try
+        {
+            byte[] newSalt = VaultCrypto.RandomBytes(16);
+            byte[] pinKey = VaultCrypto.DeriveKey(pin, newSalt, VaultCrypto.PinIterations);
+            string wrapped = VaultCrypto.Encrypt(pinKey, newSalt, vaultKey);
+            Array.Clear(pinKey, 0, pinKey.Length);
+            data.pinSalt = Convert.ToBase64String(newSalt); data.pinIterations = VaultCrypto.PinIterations; data.wrappedKey = wrapped;
+            StoreQuickUnlockData(path, data);
+        }
+        catch { }
+    }
+
     private void RemoveQuickPin(string path)
     {
         string fullPath = Path.GetFullPath(path);
@@ -480,10 +301,10 @@ internal sealed class KasamForm : Form
         {
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             byte[] pinSalt = VaultCrypto.RandomBytes(16);
-            byte[] pinKey = VaultCrypto.DeriveKey(dialog.Pin, pinSalt, VaultCrypto.Iterations);
+            byte[] pinKey = VaultCrypto.DeriveKey(dialog.Pin, pinSalt, VaultCrypto.PinIterations);
             string wrapped = VaultCrypto.Encrypt(pinKey, pinSalt, key);
             Array.Clear(pinKey, 0, pinKey.Length);
-            QuickUnlockData data = new QuickUnlockData { pinSalt = Convert.ToBase64String(pinSalt), vaultSalt = Convert.ToBase64String(salt), wrappedKey = wrapped };
+            QuickUnlockData data = new QuickUnlockData { pinSalt = Convert.ToBase64String(pinSalt), pinIterations = VaultCrypto.PinIterations, vaultSalt = Convert.ToBase64String(salt), wrappedKey = wrapped };
             if (!StoreQuickUnlockData(vaultPath, data)) { RemoveQuickPin(vaultPath); MessageBox.Show("PIN kaydedilemedi. Windows hesabı koruması oluşturulamadı.", "Kasam", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             MessageBox.Show("Bu kasa artık bu Windows hesabında 4 haneli PIN ile hızlı açılabilir. Ana parola .vault dosyasını şifrelemeye devam eder.", "Kasam", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -501,7 +322,12 @@ internal sealed class KasamForm : Form
         Button nav = MakeButton("▦   Genel görünüm", 174, true); nav.Height = 42; nav.Location = new Point(14, 100); sidebar.Controls.Add(nav);
         Label systemsLabel = MakeLabel("SİSTEMLER", 9, true, Muted); systemsLabel.Location = new Point(18, 164); sidebar.Controls.Add(systemsLabel);
         systemFilterBox = new ComboBox(); systemFilterBox.Location = new Point(14, 190); systemFilterBox.Size = new Size(174, 36); systemFilterBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; systemFilterBox.DropDownStyle = ComboBoxStyle.DropDownList; systemFilterBox.Font = new Font("Segoe UI", 10); sidebar.Controls.Add(systemFilterBox);
-        Label sidebarNote = MakeLabel("Kasa dosyan bu bilgisayarda şifreli saklanır.", 9, false, Muted); sidebarNote.Location = new Point(18, 252); sidebarNote.Size = new Size(164, 52); sidebarNote.AutoSize = false; sidebar.Controls.Add(sidebarNote);
+        Label vaultsLabel = MakeLabel("SON KULLANILAN KASALAR", 9, true, Muted); vaultsLabel.Location = new Point(18, 258); sidebar.Controls.Add(vaultsLabel);
+        recentVaultBox = new ComboBox(); recentVaultBox.Location = new Point(14, 284); recentVaultBox.Size = new Size(174, 34); recentVaultBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; recentVaultBox.DropDownStyle = ComboBoxStyle.DropDownList; recentVaultBox.Font = new Font("Segoe UI", 9); sidebar.Controls.Add(recentVaultBox);
+        Button openRecent = MakeButton("Seçili kasayı aç", 174, false); openRecent.Height = 38; openRecent.Location = new Point(14, 328); sidebar.Controls.Add(openRecent);
+        Label pinLabel = MakeLabel("HIZLI AÇILIŞ", 9, true, Muted); pinLabel.Location = new Point(18, 398); sidebar.Controls.Add(pinLabel);
+        Label pinDescription = MakeLabel("Bu Windows hesabında 4 haneli PIN kullanın.", 9, false, Muted); pinDescription.Location = new Point(18, 424); pinDescription.Size = new Size(164, 48); pinDescription.AutoSize = false; sidebar.Controls.Add(pinDescription);
+        Button pinSidebarButton = MakeButton("PIN ayarları", 174, false); pinSidebarButton.Height = 38; pinSidebarButton.Location = new Point(14, 480); sidebar.Controls.Add(pinSidebarButton);
 
         Panel header = new Panel { Dock = DockStyle.Top, Height = 124, BackColor = UITheme.Surface, Tag = "surface" }; main.Controls.Add(header);
         header.Paint += delegate(object sender, PaintEventArgs e) { using (Pen pen = new Pen(UITheme.Dark ? Color.FromArgb(51, 62, 85) : Color.FromArgb(224, 229, 239))) e.Graphics.DrawLine(pen, 0, header.Height - 1, header.Width, header.Height - 1); };
@@ -542,6 +368,8 @@ internal sealed class KasamForm : Form
         chooseVault.Click += delegate { ChooseAnotherVault(); };
         lockButton.Click += delegate { LockVault(); };
         updateButton.Click += delegate { CheckForUpdates(updateButton); };
+        openRecent.Click += delegate { OpenRecentVault(); };
+        pinSidebarButton.Click += delegate { ConfigureQuickPin(); };
         themeButton.Click += delegate { darkTheme = !darkTheme; UITheme.Dark = darkTheme; SaveSettings(); UpdateThemeControls(); };
         nav.Click += delegate { if (entryList.Items.Count > 0) entryList.SelectedIndex = 0; };
         searchHint.Click += delegate { searchBox.Focus(); };
@@ -564,7 +392,20 @@ internal sealed class KasamForm : Form
         split.Panel2.Resize += delegate { details.Width = split.Panel2.ClientSize.Width - 36; notesBox.Width = split.Panel2.ClientSize.Width - 36; copyNotesButton.Left = split.Panel2.ClientSize.Width - 108; };
         main.Resize += delegate { actions.Width = main.ClientSize.Width - 28; statusStrip.Width = main.ClientSize.Width - 32; fileLabel.Width = statusStrip.Width - 230; split.Width = main.ClientSize.Width - 32; split.Height = main.ClientSize.Height - 204; };
         UITheme.Apply(this);
-        UpdateStatus(); RefreshSystemFilter(null); RefreshEntries(null); UpdateDetails();
+        UpdateStatus(); RefreshSystemFilter(null); RefreshRecentVaults(); RefreshEntries(null); UpdateDetails();
+    }
+
+    private void OpenRecentVault()
+    {
+        RecentVaultChoice choice = recentVaultBox == null ? null : recentVaultBox.SelectedItem as RecentVaultChoice;
+        if (choice == null || (!String.IsNullOrWhiteSpace(vaultPath) && String.Equals(Path.GetFullPath(choice.Path), Path.GetFullPath(vaultPath), StringComparison.OrdinalIgnoreCase))) return;
+        if (dirty)
+        {
+            DialogResult answer = MessageBox.Show("Değişiklikleri kaydedip seçili kasaya geçilsin mi? Hayır seçerseniz değişiklikler atılır.", "Kasa değiştir", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+            if (answer == DialogResult.Cancel) return;
+            if (answer == DialogResult.Yes) { SaveVault(); if (dirty) return; }
+        }
+        OpenVault(choice.Path);
     }
 
     private void UpdateThemeControls()
@@ -836,7 +677,8 @@ internal sealed class KasamForm : Form
                                 try
                                 {
                                     byte[] pinSalt = Convert.FromBase64String(priorPinData.pinSalt);
-                                    byte[] pinKey = VaultCrypto.DeriveKey(pinDialog.Pin, pinSalt, VaultCrypto.Iterations);
+                                    int pinIterations = priorPinData.pinIterations > 0 ? priorPinData.pinIterations : VaultCrypto.Iterations;
+                                    byte[] pinKey = VaultCrypto.DeriveKey(pinDialog.Pin, pinSalt, pinIterations);
                                     JavaScriptSerializer json = new JavaScriptSerializer();
                                     VaultEnvelope wrapped = json.Deserialize<VaultEnvelope>(priorPinData.wrappedKey);
                                     byte[] wrappedSalt = Convert.FromBase64String(wrapped.kdf.salt), wrappedIv = Convert.FromBase64String(wrapped.cipher.iv), wrappedCipher = Convert.FromBase64String(wrapped.cipher.ciphertext), wrappedMac = Convert.FromBase64String(wrapped.cipher.mac);
@@ -865,10 +707,10 @@ internal sealed class KasamForm : Form
                     if (priorPinData != null && pinToKeep != null)
                     {
                         byte[] newPinSalt = VaultCrypto.RandomBytes(16);
-                        byte[] pinKey = VaultCrypto.DeriveKey(pinToKeep, newPinSalt, VaultCrypto.Iterations);
+                        byte[] pinKey = VaultCrypto.DeriveKey(pinToKeep, newPinSalt, VaultCrypto.PinIterations);
                         string wrapped = VaultCrypto.Encrypt(pinKey, newPinSalt, newKey);
                         Array.Clear(pinKey, 0, pinKey.Length);
-                        QuickUnlockData updated = new QuickUnlockData { pinSalt = Convert.ToBase64String(newPinSalt), vaultSalt = Convert.ToBase64String(newSalt), wrappedKey = wrapped };
+                        QuickUnlockData updated = new QuickUnlockData { pinSalt = Convert.ToBase64String(newPinSalt), pinIterations = VaultCrypto.PinIterations, vaultSalt = Convert.ToBase64String(newSalt), wrappedKey = wrapped };
                         if (!StoreQuickUnlockData(vaultPath, updated)) RemoveQuickPin(vaultPath);
                     }
                 }
