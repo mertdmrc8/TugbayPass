@@ -497,7 +497,7 @@ internal sealed class KasamForm : Form
         sidebar.Paint += delegate(object sender, PaintEventArgs e) { using (Pen pen = new Pen(UITheme.Dark ? Color.FromArgb(51, 62, 85) : Color.FromArgb(224, 229, 239))) e.Graphics.DrawLine(pen, sidebar.Width - 1, 0, sidebar.Width - 1, sidebar.Height); };
         BrandMark brandMark = new BrandMark(); brandMark.Location = new Point(18, 23); sidebar.Controls.Add(brandMark);
         Label brand = MakeLabel("TugbayPass", 17, true, Ink); brand.Location = new Point(62, 20); sidebar.Controls.Add(brand);
-        Label version = MakeLabel("ŞİFRE KASASI  ·  v" + AppVersion, 8, true, Muted); version.Location = new Point(62, 45); sidebar.Controls.Add(version);
+        Label version = MakeLabel("ŞİFRE KASASI  ·  v" + AppVersion, 9, true, Muted); version.Location = new Point(62, 45); sidebar.Controls.Add(version);
         Button nav = MakeButton("▦   Genel görünüm", 174, true); nav.Height = 42; nav.Location = new Point(14, 100); sidebar.Controls.Add(nav);
         Label systemsLabel = MakeLabel("SİSTEMLER", 9, true, Muted); systemsLabel.Location = new Point(18, 164); sidebar.Controls.Add(systemsLabel);
         systemFilterBox = new ComboBox(); systemFilterBox.Location = new Point(14, 190); systemFilterBox.Size = new Size(174, 36); systemFilterBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; systemFilterBox.DropDownStyle = ComboBoxStyle.DropDownList; systemFilterBox.Font = new Font("Segoe UI", 10); sidebar.Controls.Add(systemFilterBox);
