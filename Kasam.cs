@@ -22,7 +22,8 @@ internal static class Program
     }
 }
 
-public sealed class VaultPayload { public List<VaultEntry> entries { get; set; } }
+public sealed class VaultPayload { public List<VaultEntry> entries { get; set; } public List<string> systems { get; set; } public List<VaultSection> sections { get; set; } }
+public sealed class VaultSection { public string id { get; set; } public string name { get; set; } public override string ToString() { return name; } }
 public sealed class KasamSettings { public List<string> recentVaults { get; set; } public List<PinVaultRecord> pinVaults { get; set; } public bool darkTheme { get; set; } }
 public sealed class PinVaultRecord { public string path { get; set; } public string protectedData { get; set; } }
 public sealed class QuickUnlockData { public string pinSalt { get; set; } public int pinIterations { get; set; } public string vaultSalt { get; set; } public string wrappedKey { get; set; } }
@@ -35,12 +36,15 @@ internal sealed class RecentVaultChoice
 public sealed class VaultEntry
 {
     public string id { get; set; }
+    public string sectionId { get; set; }
     public string system { get; set; }
     public string title { get; set; }
     public string username { get; set; }
     public string password { get; set; }
     public string url { get; set; }
     public string notes { get; set; }
+    public string anyDeskId { get; set; }
+    public string anyDeskPassword { get; set; }
     public override string ToString() { return title + (String.IsNullOrEmpty(username) ? "" : "    ·    " + username); }
 }
 public sealed class KdfInfo { public string name { get; set; } public string hash { get; set; } public int iterations { get; set; } public string salt { get; set; } }
@@ -143,7 +147,7 @@ internal static class UITheme
         if (root == null) return;
         Form form = root as Form;
         if (form != null) form.BackColor = Canvas;
-        else if (root is Panel || root is TableLayoutPanel || root is FlowLayoutPanel || root is SplitContainer)
+        else if (root is Panel || root is TableLayoutPanel || root is FlowLayoutPanel || root is SplitContainer || root is TabControl || root is TabPage)
             root.BackColor = (root.Tag as string) == "canvas" ? Canvas : Surface;
         else if (root is CheckBox || root is RadioButton || root is GroupBox)
         { root.BackColor = Surface; root.ForeColor = Text; }
@@ -171,7 +175,7 @@ internal static class UITheme
 
 internal sealed class KasamForm : Form
 {
-    private const string AppVersion = "1.3.3";
+    private const string AppVersion = "1.3.4";
     private const string UpdateInfoUrl = "https://raw.githubusercontent.com/mertdmrc8/TugbayPass/main/update.json";
     private static readonly Color Green = Color.FromArgb(65, 91, 220);
     private static readonly Color Ink = UITheme.LightText;
@@ -180,6 +184,8 @@ internal sealed class KasamForm : Form
     private static readonly Font EntryTitleFont = new Font("Segoe UI", 10, FontStyle.Bold);
     private static readonly Font EntryUserFont = new Font("Segoe UI", 9, FontStyle.Bold);
     private List<VaultEntry> entries = new List<VaultEntry>();
+    private List<string> vaultSystems = CreateDefaultSystems();
+    private List<VaultSection> vaultSections = CreateDefaultSections();
     private byte[] key, salt;
     private string vaultPath;
     private bool dirty, revealed;
@@ -194,6 +200,7 @@ internal sealed class KasamForm : Form
     private List<PinVaultRecord> pinVaults = new List<PinVaultRecord>();
     private ListBox entryList;
     private Label titleLabel, statusLabel, fileLabel, countLabel;
+    private Label systemDetailLabel, usernameDetailLabel, passwordDetailLabel, urlDetailLabel, notesDetailLabel;
     private Button editButton, deleteButton, revealButton, copyButton;
     private Button copySystemButton, copyUsernameButton, copyUrlButton, copyNotesButton, copyTitleButton;
     private Panel body;
@@ -335,7 +342,7 @@ internal sealed class KasamForm : Form
             try { key = VaultCrypto.DeriveKey(dialog.Password, salt, VaultCrypto.Iterations); }
             catch (Exception ex) { MessageBox.Show("Anahtar oluşturulamadı.\r\n" + ex.Message, "Kasam", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
         }
-        entries = new List<VaultEntry>(); vaultPath = null; dirty = true; ShowVault();
+        entries = new List<VaultEntry>(); vaultSystems = CreateDefaultSystems(); vaultSections = CreateDefaultSections(); vaultPath = null; dirty = true; ShowVault();
     }
 
     private void OpenVault()
@@ -435,7 +442,13 @@ internal sealed class KasamForm : Form
             {
                 if (e == null || String.IsNullOrWhiteSpace(e.title) || e.id == null || e.username == null || e.password == null || e.url == null || e.notes == null) throw new InvalidDataException("Kasadaki bir kayıt eksik veya bozuk.");
                 if (String.IsNullOrWhiteSpace(e.system)) e.system = "Diğer";
+                if (String.IsNullOrWhiteSpace(e.sectionId)) e.sectionId = String.Equals(e.system, "PC", StringComparison.CurrentCultureIgnoreCase) ? "pc" : "account";
             }
+            vaultSystems = payload.systems ?? CreateDefaultSystems();
+            vaultSections = payload.sections ?? CreateDefaultSections();
+            if (vaultSections.Count == 0) vaultSections = CreateDefaultSections();
+            foreach (VaultEntry e in payload.entries)
+                if (!vaultSystems.Contains(e.system, StringComparer.CurrentCultureIgnoreCase) && !String.Equals(e.system, "PC", StringComparison.CurrentCultureIgnoreCase)) vaultSystems.Add(e.system);
             if (plaintext != null) Array.Clear(plaintext, 0, plaintext.Length);
             if (key != null) Array.Clear(key, 0, key.Length);
             key = candidateKey; salt = fileSalt; entries = payload.entries; vaultPath = path; dirty = false; RememberVault(path);
@@ -549,10 +562,10 @@ internal sealed class KasamForm : Form
         Label heading = MakeLabel("Şifre kasası", 19, true, Ink); heading.Location = new Point(22, 15); header.Controls.Add(heading);
         Label headingSub = MakeLabel("Hesaplarını görüntüle ve düzenle", 9, false, Muted); headingSub.Location = new Point(24, 46); header.Controls.Add(headingSub);
         FlowLayoutPanel actions = new FlowLayoutPanel { Location = new Point(14, 72), Size = new Size(main.ClientSize.Width - 28, 44), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoScroll = true, BackColor = UITheme.Surface, Tag = "surface", Padding = new Padding(0) }; header.Controls.Add(actions);
-        Button add = MakeButton("+ Yeni kayıt", 112, true), save = MakeButton("Kaydet", 92, false), changeMaster = MakeButton("Ana parola", 94, false), pinButton = MakeButton("PIN ayarı", 84, false), chooseVault = MakeButton("Kasa seç", 80, false), lockButton = MakeButton("Kilitle", 72, false), updateButton = MakeButton("Güncellemeleri denetle", 154, false);
+        Button add = MakeButton("+ Yeni kayıt", 112, true), save = MakeButton("Kaydet", 92, false), changeMaster = MakeButton("Ana parola", 94, false), pinButton = MakeButton("PIN ayarı", 84, false), chooseVault = MakeButton("Kasa seç", 80, false), lockButton = MakeButton("Kilitle", 72, false), settingsButton = MakeButton("Ayarlar", 84, false), updateButton = MakeButton("Güncellemeleri denetle", 154, false);
         Button themeButton = MakeButton(darkTheme ? "☀ Açık tema" : "☾ Koyu tema", 108, false); themeButton.Location = new Point(0, 17); themeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right; header.Controls.Add(themeButton);
         header.Resize += delegate { themeButton.Left = Math.Max(12, header.ClientSize.Width - themeButton.Width - 18); };
-        actions.Controls.AddRange(new Control[] { add, save, changeMaster, pinButton, chooseVault, lockButton, updateButton });
+        actions.Controls.AddRange(new Control[] { add, save, changeMaster, pinButton, chooseVault, lockButton, settingsButton, updateButton });
 
         Panel statusStrip = new Panel { Location = new Point(16, 128), Size = new Size(main.ClientSize.Width - 32, 30), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, BackColor = Canvas, Tag = "canvas" }; main.Controls.Add(statusStrip);
         statusLabel = MakeLabel("", 9, true, Green); statusLabel.Location = new Point(5, 6); statusLabel.Tag = "accent"; statusStrip.Controls.Add(statusLabel);
@@ -569,11 +582,11 @@ internal sealed class KasamForm : Form
         deleteButton = MakeButton("Sil", 62, false); deleteButton.ForeColor = Color.FromArgb(205, 92, 106); deleteButton.Location = new Point(split.Panel2.Width - 82, 18); deleteButton.Anchor = AnchorStyles.Top | AnchorStyles.Right; split.Panel2.Controls.Add(deleteButton);
         TableLayoutPanel details = new TableLayoutPanel { Location = new Point(18, 68), Size = new Size(split.Panel2.Width - 36, 244), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, ColumnCount = 1, RowCount = 4, BackColor = UITheme.Surface, Padding = new Padding(8, 3, 8, 3), Margin = new Padding(0), Tag = "surface" };
         details.RowStyles.Add(new RowStyle(SizeType.Percent, 25)); details.RowStyles.Add(new RowStyle(SizeType.Percent, 25)); details.RowStyles.Add(new RowStyle(SizeType.Percent, 25)); details.RowStyles.Add(new RowStyle(SizeType.Percent, 25)); split.Panel2.Controls.Add(details);
-        AddCopyDetailField(details, "Sistem", out systemBox, out copySystemButton);
-        AddCopyDetailField(details, "Kullanıcı adı / e-posta", out usernameBox, out copyUsernameButton);
-        AddCopyDetailField(details, "Parola", out passwordBox, out copyButton, true);
-        AddCopyDetailField(details, "Web adresi", out urlBox, out copyUrlButton);
-        Label notesLabel = MakeLabel("Notlar", 9, true, Muted); notesLabel.Location = new Point(20, 326); split.Panel2.Controls.Add(notesLabel);
+        AddCopyDetailField(details, "Sistem", out systemBox, out copySystemButton, out systemDetailLabel);
+        AddCopyDetailField(details, "Kullanıcı adı / e-posta", out usernameBox, out copyUsernameButton, out usernameDetailLabel);
+        AddCopyDetailField(details, "Parola", out passwordBox, out copyButton, out passwordDetailLabel, true);
+        AddCopyDetailField(details, "Web adresi", out urlBox, out copyUrlButton, out urlDetailLabel);
+        notesDetailLabel = MakeLabel("Notlar", 9, true, Muted); notesDetailLabel.Location = new Point(20, 326); split.Panel2.Controls.Add(notesDetailLabel);
         copyNotesButton = MakeButton("Kopyala", 88, false); copyNotesButton.Height = 34; copyNotesButton.Location = new Point(split.Panel2.Width - 106, 320); copyNotesButton.Anchor = AnchorStyles.Top | AnchorStyles.Right; split.Panel2.Controls.Add(copyNotesButton);
         notesBox = new TextBox(); notesBox.Location = new Point(18, 362); notesBox.Size = new Size(split.Panel2.Width - 36, split.Panel2.Height - 380); notesBox.Multiline = true; notesBox.ReadOnly = true; notesBox.ScrollBars = ScrollBars.Vertical; notesBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right; notesBox.Font = new Font("Segoe UI", 10); split.Panel2.Controls.Add(notesBox);
         Label footer = MakeLabel("TugbayPass  ·  v" + AppVersion + "  ·  Kasanız bu bilgisayarda şifreli saklanır.", 9, false, Muted); footer.Location = new Point(18, main.ClientSize.Height - 30); footer.Anchor = AnchorStyles.Bottom | AnchorStyles.Left; main.Controls.Add(footer);
@@ -584,6 +597,7 @@ internal sealed class KasamForm : Form
         chooseVault.Click += delegate { ChooseAnotherVault(); };
         lockButton.Click += delegate { LockVault(); };
         updateButton.Click += delegate { CheckForUpdates(updateButton); };
+        settingsButton.Click += delegate { OpenVaultSettings(); };
         openRecent.Click += delegate { OpenRecentVault(); };
         pinSidebarButton.Click += delegate { ConfigureQuickPin(); };
         themeButton.Click += delegate { darkTheme = !darkTheme; UITheme.Dark = darkTheme; SaveSettings(); UpdateThemeControls(); };
@@ -600,11 +614,11 @@ internal sealed class KasamForm : Form
         deleteButton.Click += delegate { DeleteEntry(); };
         revealButton.Click += delegate { ToggleReveal(); };
         copyButton.Click += delegate { CopyPassword(); };
-        copyTitleButton.Click += delegate { CopyField(titleLabel.Text, "Hesap adı"); };
-        copySystemButton.Click += delegate { CopyField(systemBox.Text, "Sistem"); };
-        copyUsernameButton.Click += delegate { CopyField(usernameBox.Text, "Kullanıcı adı / e-posta"); };
-        copyUrlButton.Click += delegate { CopyField(urlBox.Text, "Web adresi"); };
-        copyNotesButton.Click += delegate { CopyField(notesBox.Text, "Notlar"); };
+        copyTitleButton.Click += delegate { CopyField(titleLabel.Text, IsSelectedPc() ? "PC adı" : "Hesap adı"); };
+        copySystemButton.Click += delegate { CopyField(systemBox.Text, IsSelectedPc() ? "AnyDesk ID" : "Sistem"); };
+        copyUsernameButton.Click += delegate { CopyField(usernameBox.Text, IsSelectedPc() ? "PC sahibi" : "Kullanıcı adı / e-posta"); };
+        copyUrlButton.Click += delegate { CopyField(urlBox.Text, IsSelectedPc() ? "PC konumu" : "Web adresi"); };
+        copyNotesButton.Click += delegate { CopyField(notesBox.Text, IsSelectedPc() ? "AnyDesk Şifresi" : "Notlar"); };
         split.Panel2.Resize += delegate { int panelWidth = split.Panel2.ClientSize.Width; details.Width = panelWidth - 36; notesBox.Width = panelWidth - 36; copyNotesButton.Left = panelWidth - 106; titleLabel.Width = Math.Max(80, panelWidth - 285); copyTitleButton.Left = panelWidth - 250; editButton.Left = panelWidth - 168; deleteButton.Left = panelWidth - 82; };
         main.Resize += delegate { actions.Width = main.ClientSize.Width - 28; statusStrip.Width = main.ClientSize.Width - 32; fileLabel.Width = Math.Max(80, statusStrip.Width - 230); split.Width = main.ClientSize.Width - 32; split.Height = main.ClientSize.Height - 204; };
         UITheme.Apply(this);
@@ -624,6 +638,21 @@ internal sealed class KasamForm : Form
         OpenVault(choice.Path);
     }
 
+    private void OpenVaultSettings()
+    {
+        using (VaultSettingsDialog dialog = new VaultSettingsDialog(vaultSystems, vaultSections, entries))
+        {
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            foreach (VaultEntry entry in entries)
+                foreach (KeyValuePair<string, string> rename in dialog.SystemRenames)
+                    if (String.Equals(entry.system, rename.Key, StringComparison.CurrentCultureIgnoreCase)) { entry.system = rename.Value; break; }
+            vaultSystems = dialog.Systems;
+            vaultSections = dialog.Sections;
+            dirty = true;
+            UpdateStatus(); RefreshSystemFilter(null); RefreshEntries(null);
+        }
+    }
+
     private void UpdateThemeControls()
     {
         UITheme.Apply(this);
@@ -639,10 +668,10 @@ internal sealed class KasamForm : Form
         foreach (Control child in control.Controls) UpdateThemeControlsRecursive(child);
     }
 
-    private void AddCopyDetailField(TableLayoutPanel table, string caption, out TextBox box, out Button copy, bool password = false)
+    private void AddCopyDetailField(TableLayoutPanel table, string caption, out TextBox box, out Button copy, out Label captionLabel, bool password = false)
     {
         Panel row = new Panel { Dock = DockStyle.Fill, BackColor = UITheme.Surface, Tag = "surface", Margin = new Padding(0) };
-        Label label = MakeLabel(caption, 9, true, Muted); label.Location = new Point(4, 1); row.Controls.Add(label);
+        captionLabel = MakeLabel(caption, 9, true, Muted); captionLabel.Location = new Point(4, 1); row.Controls.Add(captionLabel);
         box = new TextBox { Location = new Point(4, 22), Size = new Size(table.ClientSize.Width - 132, 27), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, ReadOnly = true, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 10), BackColor = UITheme.Input };
         if (password) box.UseSystemPasswordChar = true;
         row.Controls.Add(box);
@@ -693,7 +722,7 @@ internal sealed class KasamForm : Form
         foreach (VaultEntry e in entries)
         {
             bool matchesSystem = allSystems || selectedSystems.Contains(e.system ?? "");
-            bool matchesSearch = q.Length == 0 || (e.system + " " + e.title + " " + e.username + " " + e.password + " " + e.url + " " + e.notes).IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0;
+            bool matchesSearch = q.Length == 0 || (e.system + " " + e.title + " " + e.username + " " + e.password + " " + e.url + " " + e.notes + " " + e.anyDeskId + " " + e.anyDeskPassword).IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0;
             if (matchesSystem && matchesSearch) entryList.Items.Add(e);
         }
         entryList.EndUpdate(); countLabel.Text = entryList.Items.Count + " kayıt";
@@ -775,9 +804,20 @@ internal sealed class KasamForm : Form
 
     private List<string> GetSystems()
     {
-        List<string> result = new List<string>();
+        List<string> result = new List<string> { "PC" };
+        foreach (string system in vaultSystems) if (!String.IsNullOrWhiteSpace(system) && !result.Contains(system, StringComparer.CurrentCultureIgnoreCase)) result.Add(system);
         foreach (VaultEntry e in entries) if (!String.IsNullOrWhiteSpace(e.system) && !result.Contains(e.system, StringComparer.CurrentCultureIgnoreCase)) result.Add(e.system);
         result.Sort(StringComparer.CurrentCultureIgnoreCase); return result;
+    }
+
+    private static List<string> CreateDefaultSystems()
+    {
+        return new List<string> { "Apple", "Banka", "Diğer", "E-posta", "Facebook", "Google", "Instagram", "Microsoft", "WhatsApp" };
+    }
+
+    private static List<VaultSection> CreateDefaultSections()
+    {
+        return new List<VaultSection> { new VaultSection { id = "account", name = "Hesap" }, new VaultSection { id = "pc", name = "PC" } };
     }
 
     private void RefreshSystemFilter(string selectSystem)
@@ -827,12 +867,18 @@ internal sealed class KasamForm : Form
     }
 
     private VaultEntry SelectedEntry() { return entryList != null ? entryList.SelectedItem as VaultEntry : null; }
+    private bool IsSelectedPc() { VaultEntry entry = SelectedEntry(); return entry != null && (String.Equals(entry.sectionId, "pc", StringComparison.OrdinalIgnoreCase) || String.IsNullOrEmpty(entry.sectionId) && String.Equals(entry.system, "PC", StringComparison.CurrentCultureIgnoreCase)); }
 
     private void UpdateDetails()
     {
-        VaultEntry e = SelectedEntry(); bool has = e != null;
+        VaultEntry e = SelectedEntry(); bool has = e != null; bool pc = has && (String.Equals(e.sectionId, "pc", StringComparison.OrdinalIgnoreCase) || String.IsNullOrEmpty(e.sectionId) && String.Equals(e.system, "PC", StringComparison.CurrentCultureIgnoreCase));
         if (titleLabel == null) return;
-        titleLabel.Text = has ? e.title : ""; systemBox.Text = has ? e.system : ""; usernameBox.Text = has ? e.username : ""; passwordBox.Text = has ? e.password : ""; urlBox.Text = has ? e.url : ""; notesBox.Text = has ? e.notes : "";
+        titleLabel.Text = has ? e.title : ""; systemBox.Text = has ? (pc ? e.anyDeskId : e.system) : ""; usernameBox.Text = has ? e.username : ""; passwordBox.Text = has ? e.password : ""; urlBox.Text = has ? e.url : ""; notesBox.Text = has ? (pc ? e.anyDeskPassword : e.notes) : "";
+        systemDetailLabel.Text = pc ? "AnyDesk ID" : "Sistem";
+        usernameDetailLabel.Text = pc ? "PC'nin kime ait olduğu" : "Kullanıcı adı / e-posta";
+        passwordDetailLabel.Text = pc ? "PC Şifresi" : "Parola";
+        urlDetailLabel.Text = pc ? "PC'nin konumu" : "Web adresi";
+        notesDetailLabel.Text = pc ? "AnyDesk Şifresi" : "Notlar";
         revealed = has; passwordBox.UseSystemPasswordChar = !revealed; if (revealButton != null) revealButton.Text = revealed ? "Gizle" : "Göster";
         editButton.Enabled = deleteButton.Enabled = revealButton.Enabled = copyButton.Enabled = has;
         copyTitleButton.Enabled = copySystemButton.Enabled = copyUsernameButton.Enabled = copyUrlButton.Enabled = copyNotesButton.Enabled = true;
@@ -840,12 +886,12 @@ internal sealed class KasamForm : Form
 
     private void AddEntry()
     {
-        using (EntryDialog dialog = new EntryDialog(null, GetSystems())) if (dialog.ShowDialog(this) == DialogResult.OK) { entries.Add(dialog.Value); dirty = true; UpdateStatus(); RefreshSystemFilter(dialog.Value.system); RefreshEntries(dialog.Value.id); }
+        using (EntryDialog dialog = new EntryDialog(null, GetSystems(), vaultSections)) if (dialog.ShowDialog(this) == DialogResult.OK) { entries.Add(dialog.Value); dirty = true; UpdateStatus(); RefreshSystemFilter(dialog.Value.system); RefreshEntries(dialog.Value.id); }
     }
     private void EditEntry()
     {
         VaultEntry selected = SelectedEntry(); if (selected == null) return;
-        using (EntryDialog dialog = new EntryDialog(selected, GetSystems())) if (dialog.ShowDialog(this) == DialogResult.OK) { int i = entries.FindIndex(x => x.id == selected.id); if (i >= 0) entries[i] = dialog.Value; dirty = true; UpdateStatus(); RefreshSystemFilter(dialog.Value.system); RefreshEntries(dialog.Value.id); }
+        using (EntryDialog dialog = new EntryDialog(selected, GetSystems(), vaultSections)) if (dialog.ShowDialog(this) == DialogResult.OK) { int i = entries.FindIndex(x => x.id == selected.id); if (i >= 0) entries[i] = dialog.Value; dirty = true; UpdateStatus(); RefreshSystemFilter(dialog.Value.system); RefreshEntries(dialog.Value.id); }
     }
     private void DeleteEntry()
     {
@@ -859,7 +905,7 @@ internal sealed class KasamForm : Form
     }
     private void CopyPassword()
     {
-        CopyField(passwordBox.Text, "Parola");
+        CopyField(passwordBox.Text, IsSelectedPc() ? "PC şifresi" : "Parola");
     }
 
     private void CopyField(string value, string caption)
@@ -902,7 +948,7 @@ internal sealed class KasamForm : Form
     private string CreateVaultContainer(byte[] encryptionKey, byte[] encryptionSalt)
     {
         JavaScriptSerializer json = new JavaScriptSerializer(); json.MaxJsonLength = 50 * 1024 * 1024;
-        byte[] plaintext = Encoding.UTF8.GetBytes(json.Serialize(new VaultPayload { entries = entries }));
+        byte[] plaintext = Encoding.UTF8.GetBytes(json.Serialize(new VaultPayload { entries = entries, systems = vaultSystems, sections = vaultSections }));
         return VaultCrypto.Encrypt(encryptionKey, encryptionSalt, plaintext);
     }
 
@@ -1020,20 +1066,7 @@ internal sealed class KasamForm : Form
     }
     private void OnClosing(object sender, FormClosingEventArgs e)
     {
-        if (dirty && MessageBox.Show("Kaydedilmemiş değişiklikler var. Uygulamadan çıkılsın mı?", "Kasam", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) e.Cancel = true;
-        else ClearVault();
-    }
-}
-
-internal sealed class PasswordDialog : Form
-{
-    private readonly TextBox first, second;
-    public string Password { get; private set; }
-    public PasswordDialog(string title, bool confirm)
-    {
-        Text = title; Size = new Size(430, confirm ? 300 : 220); StartPosition = FormStartPosition.CenterParent; FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; BackColor = Color.FromArgb(251,252,250); Font = new Font("Segoe UI",9);
-        Label label = new Label { Text = "Ana parola", Location = new Point(24,22), AutoSize = true };
-        first = new TextBox { Location = new Point(24,48), Size = new Size(365,29), UseSystemPasswordChar = true, Font = new Font("Segoe UI",11) }; Controls.Add(label); Controls.Add(first);
+        if (dirty && MessageBox.Show("Kayi;
         second = null;
         if (confirm)
         {
@@ -1132,50 +1165,186 @@ internal sealed class PinUnlockDialog : Form
 
 internal sealed class EntryDialog : Form
 {
-    private readonly TextBox title, username, password, url, notes;
-    private readonly ComboBox system;
+    private readonly TextBox title, username, password, url, notes, anyDeskId, anyDeskPassword;
+    private readonly Label titleLabel, usernameLabel, passwordLabel, urlLabel, notesLabel, anyDeskIdLabel, anyDeskPasswordLabel;
+    private readonly ComboBox system, section;
+    private readonly int notesLabelTop, notesBoxTop;
     public VaultEntry Value { get; private set; }
-    public EntryDialog(VaultEntry existing, IEnumerable<string> knownSystems)
+    public EntryDialog(VaultEntry existing, IEnumerable<string> knownSystems, IEnumerable<VaultSection> knownSections)
     {
         bool edit = existing != null; Text = edit ? "Kaydı düzenle" : "Yeni hesap kaydı"; Size = new Size(520, 610); StartPosition = FormStartPosition.CenterParent; FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; BackColor = Color.FromArgb(251,252,250); Font = new Font("Segoe UI",9);
         int y = 20;
-        Controls.Add(new Label { Text="Sistem *", Location=new Point(25,y), AutoSize=true, ForeColor=Color.FromArgb(31,41,37) }); y += 23;
-        system = new ComboBox { Location=new Point(25,y), Width=350, DropDownStyle=ComboBoxStyle.DropDown, Font=new Font("Segoe UI",10), AutoCompleteMode=AutoCompleteMode.SuggestAppend, AutoCompleteSource=AutoCompleteSource.ListItems };
-        List<string> options = new List<string> { "Google", "Apple", "Microsoft", "E-posta", "Banka", "Instagram", "Facebook", "WhatsApp", "Diğer" };
+        Controls.Add(new Label { Text="Bölüm *", Location=new Point(25,y), AutoSize=true, ForeColor=Color.FromArgb(31,41,37) });
+        Controls.Add(new Label { Text="Sistem *", Location=new Point(215,y), AutoSize=true, ForeColor=Color.FromArgb(31,41,37) });
+        section = new ComboBox { Location=new Point(25,y+23), Width=175, DropDownStyle=ComboBoxStyle.DropDownList, Font=new Font("Segoe UI",10) };
+        foreach (VaultSection known in knownSections) section.Items.Add(new VaultSection { id=known.id, name=known.name });
+        if (section.Items.Count > 0) section.SelectedIndex = 0;
+        Controls.Add(section);
+        system = new ComboBox { Location=new Point(215,y+23), Width=190, DropDownStyle=ComboBoxStyle.DropDown, Font=new Font("Segoe UI",10), AutoCompleteMode=AutoCompleteMode.SuggestAppend, AutoCompleteSource=AutoCompleteSource.ListItems };
+        List<string> options = new List<string> { "PC" };
         foreach (string known in knownSystems) if (!options.Contains(known, StringComparer.CurrentCultureIgnoreCase)) options.Add(known);
         options.Sort(StringComparer.CurrentCultureIgnoreCase); system.Items.AddRange(options.ToArray()); Controls.Add(system); y += 40;
-        Button addSystem = new Button { Text="Listeye ekle", Location=new Point(385,y-40), Size=new Size(90,30), FlatStyle=FlatStyle.Flat };
+        Button addSystem = new Button { Text="Ekle", Location=new Point(410,y-40), Size=new Size(65,30), FlatStyle=FlatStyle.Flat };
         addSystem.Click += delegate
         {
             string value = system.Text.Trim();
-            if (value.Length == 0) { MessageBox.Show("Önce eklenecek sistem adını yazın.", "Kasam", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            if (value.Length == 0) { MessageBox.Show("Önce eklenecek sistem adını yazın.", "TugbayPass", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             if (!system.Items.Contains(value)) system.Items.Add(value);
             system.Text = value;
         };
         Controls.Add(addSystem);
-        title = AddField("Hesap adı *", ref y); username = AddField("Kullanıcı adı veya e-posta", ref y); password = AddField("Parola", ref y); password.UseSystemPasswordChar = true;
+        title = AddField("Hesap adı *", ref y, out titleLabel); username = AddField("Kullanıcı adı veya e-posta", ref y, out usernameLabel); password = AddField("Parola", ref y, out passwordLabel); password.UseSystemPasswordChar = true;
         Button generate = new Button { Text = "Güçlü parola üret", Location = new Point(25,y), Size = new Size(145,30), FlatStyle = FlatStyle.Flat };
         NumericUpDown length = new NumericUpDown { Minimum = 12, Maximum = 64, Value = 20, Location = new Point(244,y + 2), Width = 60 };
         Controls.Add(generate); Controls.Add(new Label { Text = "Uzunluk", Location = new Point(185,y + 7), AutoSize = true, ForeColor = Color.FromArgb(104,115,109) }); Controls.Add(length); y += 42;
-        url = AddField("Web adresi", ref y); notes = AddField("Notlar", ref y, true);
-        if (edit) { system.Text=existing.system; title.Text=existing.title; username.Text=existing.username; password.Text=existing.password; url.Text=existing.url; notes.Text=existing.notes; }
+        url = AddField("Web adresi", ref y, out urlLabel);
+        anyDeskId = AddField("AnyDesk ID", ref y, out anyDeskIdLabel);
+        anyDeskPassword = AddField("AnyDesk Şifresi", ref y, out anyDeskPasswordLabel); anyDeskPassword.UseSystemPasswordChar = true;
+        notes = AddField("Notlar", ref y, out notesLabel, true); notesLabelTop = notesLabel.Top; notesBoxTop = notes.Top;
+        if (edit) { system.Text=existing.system; title.Text=existing.title; username.Text=existing.username; password.Text=existing.password; url.Text=existing.url; notes.Text=existing.notes; anyDeskId.Text=existing.anyDeskId; anyDeskPassword.Text=existing.anyDeskPassword;
+            string sectionId = existing.sectionId ?? (String.Equals(existing.system, "PC", StringComparison.CurrentCultureIgnoreCase) ? "pc" : "account");
+            for (int i=0;i<section.Items.Count;i++) if (String.Equals(((VaultSection)section.Items[i]).id,sectionId,StringComparison.OrdinalIgnoreCase)) { section.SelectedIndex=i; break; }
+        }
+        system.TextChanged += delegate { ApplyPcMode(); };
+        section.SelectedIndexChanged += delegate { ApplyPcMode(); };
+        ApplyPcMode();
         generate.Click += delegate { password.Text = PasswordGenerator.Create((int)length.Value); password.UseSystemPasswordChar = false; };
         Button cancel = new Button { Text="İptal", Location=new Point(165,520), Size=new Size(96,38), DialogResult=DialogResult.Cancel };
         Button save = new Button { Text=edit ? "Değişiklikleri kaydet" : "Kaydı ekle", Location=new Point(270,520), Size=new Size(205,38), BackColor=Color.FromArgb(30,101,78), ForeColor=Color.White, FlatStyle=FlatStyle.Flat };
         save.Click += delegate
         {
             if (String.IsNullOrWhiteSpace(system.Text)) { MessageBox.Show("Parolanın ait olduğu sistemi seçin veya yazın.", "Kasam", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (String.IsNullOrWhiteSpace(title.Text)) { MessageBox.Show("Hesap adını girin.", "Kasam", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            Value = new VaultEntry { id=edit ? existing.id : Guid.NewGuid().ToString("N"), system=system.Text.Trim(), title=title.Text.Trim(), username=username.Text.Trim(), password=password.Text, url=url.Text.Trim(), notes=notes.Text.Trim() };
+            if (String.IsNullOrWhiteSpace(title.Text)) { MessageBox.Show(IsPcMode() ? "PC adını girin." : "Hesap adını girin.", "Kasam", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            bool pc = IsPcMode();
+            VaultSection selectedSection = section.SelectedItem as VaultSection;
+            Value = new VaultEntry { id=edit ? existing.id : Guid.NewGuid().ToString("N"), sectionId=selectedSection == null ? "account" : selectedSection.id, system=pc ? "PC" : system.Text.Trim(), title=title.Text.Trim(), username=username.Text.Trim(), password=password.Text, url=url.Text.Trim(), notes=pc ? "" : notes.Text.Trim(), anyDeskId=pc ? anyDeskId.Text.Trim() : null, anyDeskPassword=pc ? anyDeskPassword.Text : null };
             DialogResult = DialogResult.OK; Close();
         };
         Controls.Add(cancel); Controls.Add(save); AcceptButton=save; CancelButton=cancel; Shown += delegate { UITheme.Apply(this); title.Focus(); };
     }
-    private TextBox AddField(string caption, ref int y, bool multiline=false)
+    private bool IsPcMode() { VaultSection selected = section == null ? null : section.SelectedItem as VaultSection; return selected != null && String.Equals(selected.id, "pc", StringComparison.OrdinalIgnoreCase); }
+    private void ApplyPcMode()
     {
-        Controls.Add(new Label { Text=caption, Location=new Point(25,y), AutoSize=true, ForeColor=Color.FromArgb(31,41,37) }); y+=23;
+        bool pc = IsPcMode();
+        if (system != null)
+        {
+            system.Enabled = !pc;
+            if (pc) system.Text = "PC";
+        }
+        titleLabel.Text = pc ? "PC adı *" : "Hesap adı *";
+        usernameLabel.Text = pc ? "PC'nin kime ait olduğu" : "Kullanıcı adı veya e-posta";
+        passwordLabel.Text = pc ? "PC Şifresi" : "Parola";
+        urlLabel.Text = pc ? "PC'nin konumu" : "Web adresi";
+        anyDeskIdLabel.Visible = anyDeskId.Visible = pc;
+        anyDeskPasswordLabel.Visible = anyDeskPassword.Visible = pc;
+        notesLabel.Visible = notes.Visible = !pc;
+        notesLabel.Location = new Point(notesLabel.Left, pc ? notesLabelTop : notesLabelTop - 124);
+        notes.Location = new Point(notes.Left, pc ? notesBoxTop : notesBoxTop - 124);
+    }
+    private TextBox AddField(string caption, ref int y, out Label label, bool multiline=false)
+    {
+        label = new Label { Text=caption, Location=new Point(25,y), AutoSize=true, ForeColor=Color.FromArgb(31,41,37) }; Controls.Add(label); y+=23;
         TextBox box = new TextBox { Location=new Point(25,y), Width=450, Font=new Font("Segoe UI",10), Multiline=multiline, Height=multiline ? 78 : 27, ScrollBars=multiline ? ScrollBars.Vertical : ScrollBars.None };
         Controls.Add(box); y += multiline ? 91 : 39; return box;
+    }
+}
+
+internal sealed class VaultSettingsDialog : Form
+{
+    private readonly ListBox systemList = new ListBox();
+    private readonly ListBox sectionList = new ListBox();
+    private readonly TextBox systemName = new TextBox();
+    private readonly TextBox sectionName = new TextBox();
+    private readonly List<VaultEntry> entries;
+    public List<string> Systems { get; private set; }
+    public List<VaultSection> Sections { get; private set; }
+    public Dictionary<string, string> SystemRenames { get; private set; }
+
+    public VaultSettingsDialog(IEnumerable<string> systems, IEnumerable<VaultSection> sections, List<VaultEntry> entries)
+    {
+        this.entries = entries;
+        Systems = new List<string>(systems ?? Enumerable.Empty<string>());
+        Systems.RemoveAll(x => String.Equals(x, "PC", StringComparison.CurrentCultureIgnoreCase));
+        Systems = Systems.Distinct(StringComparer.CurrentCultureIgnoreCase).OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase).ToList();
+        Sections = (sections ?? Enumerable.Empty<VaultSection>()).Select(x => new VaultSection { id=x.id, name=x.name }).ToList();
+        if (Sections.Count == 0) Sections.AddRange(new [] { new VaultSection { id="account", name="Hesap" }, new VaultSection { id="pc", name="PC" } });
+        SystemRenames = new Dictionary<string, string>(StringComparer.CurrentCultureIgnoreCase);
+        Text = "TugbayPass Ayarları"; Size = new Size(700, 470); StartPosition = FormStartPosition.CenterParent; FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; Font = new Font("Segoe UI", 9); BackColor = UITheme.Canvas;
+        TabControl tabs = new TabControl { Location=new Point(14,14), Size=new Size(656,355), Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right };
+        TabPage systemsPage = new TabPage("Sistemler"); TabPage sectionsPage = new TabPage("Bölümler"); tabs.TabPages.Add(systemsPage); tabs.TabPages.Add(sectionsPage); Controls.Add(tabs);
+        BuildCatalogPage(systemsPage, systemList, systemName, "Yeni sistem ekleyin veya seçili sistemin adını değiştirin.", AddSystem, RenameSystem, RemoveSystem);
+        BuildCatalogPage(sectionsPage, sectionList, sectionName, "PC bölümü özel alanları, diğer bölümler hesap alanlarını kullanır.", AddSection, RenameSection, RemoveSection);
+        systemList.Items.AddRange(Systems.Cast<object>().ToArray());
+        sectionList.Items.AddRange(Sections.Cast<object>().ToArray());
+        Button cancel = new Button { Text="İptal", Location=new Point(448,383), Size=new Size(100,38), Anchor=AnchorStyles.Bottom|AnchorStyles.Right, DialogResult=DialogResult.Cancel, FlatStyle=FlatStyle.Flat };
+        Button save = new Button { Text="Ayarları uygula", Location=new Point(556,383), Size=new Size(112,38), Anchor=AnchorStyles.Bottom|AnchorStyles.Right, FlatStyle=FlatStyle.Flat, BackColor=Color.FromArgb(65,91,220), ForeColor=Color.White };
+        save.Click += delegate { DialogResult=DialogResult.OK; Close(); };
+        Controls.Add(cancel); Controls.Add(save); AcceptButton=save; CancelButton=cancel; Shown += delegate { UITheme.Apply(this); };
+    }
+
+    private void BuildCatalogPage(TabPage page, ListBox list, TextBox input, string hint, EventHandler addAction, EventHandler renameAction, EventHandler removeAction)
+    {
+        list.Location=new Point(12,12); list.Size=new Size(275,270); list.Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left; list.Font=new Font("Segoe UI",10); list.IntegralHeight=false; page.Controls.Add(list);
+        input.Location=new Point(304,18); input.Size=new Size(315,30); input.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right; input.Font=new Font("Segoe UI",10); page.Controls.Add(input);
+        Button add = CatalogButton("Ekle",new Point(304,62),addAction); page.Controls.Add(add);
+        Button rename = CatalogButton("Adını değiştir",new Point(394,62),renameAction); page.Controls.Add(rename);
+        Button remove = CatalogButton("Kaldır",new Point(514,62),removeAction); page.Controls.Add(remove);
+        Label description = new Label { Text=hint, Location=new Point(304,112), Size=new Size(315,64), Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right, AutoSize=false, ForeColor=UITheme.Muted }; page.Controls.Add(description);
+        Label footer = new Label { Text="Değişiklikleri uyguladıktan sonra kasayı kaydedin.", Location=new Point(304,190), Size=new Size(315,42), Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right, AutoSize=false, ForeColor=UITheme.Muted }; page.Controls.Add(footer);
+    }
+
+    private Button CatalogButton(string text, Point location, EventHandler click)
+    {
+        Button button = new Button { Text=text, Location=location, Size=new Size(text=="Adını değiştir" ? 112 : 82,36), FlatStyle=FlatStyle.Flat, UseVisualStyleBackColor=false, BackColor=UITheme.Surface, ForeColor=UITheme.Text, Cursor=Cursors.Hand };
+        button.Click += click; return button;
+    }
+
+    private string CleanName(TextBox input)
+    {
+        string value=(input.Text??"").Trim();
+        if (value.Length==0) { MessageBox.Show("Bir ad yazın.","TugbayPass",MessageBoxButtons.OK,MessageBoxIcon.Information); return null; }
+        return value;
+    }
+
+    private void AddSystem(object sender, EventArgs e)
+    {
+        string value=CleanName(systemName); if(value==null)return;
+        if(Systems.Contains(value,StringComparer.CurrentCultureIgnoreCase)){MessageBox.Show("Bu sistem zaten var.","TugbayPass",MessageBoxButtons.OK,MessageBoxIcon.Information);return;}
+        Systems.Add(value); Systems.Sort(StringComparer.CurrentCultureIgnoreCase); systemList.Items.Clear(); systemList.Items.AddRange(Systems.Cast<object>().ToArray()); systemList.SelectedItem=value; systemName.Clear();
+    }
+    private void RenameSystem(object sender, EventArgs e)
+    {
+        string old=systemList.SelectedItem as string, value=CleanName(systemName); if(old==null||value==null)return;
+        if(Systems.Any(x=>!String.Equals(x,old,StringComparison.CurrentCultureIgnoreCase)&&String.Equals(x,value,StringComparison.CurrentCultureIgnoreCase))){MessageBox.Show("Bu sistem adı zaten kullanılıyor.","TugbayPass",MessageBoxButtons.OK,MessageBoxIcon.Information);return;}
+        Systems.RemoveAll(x=>String.Equals(x,old,StringComparison.CurrentCultureIgnoreCase)); Systems.Add(value); Systems.Sort(StringComparer.CurrentCultureIgnoreCase);
+        foreach(string key in SystemRenames.Keys.ToList()) if(String.Equals(SystemRenames[key],old,StringComparison.CurrentCultureIgnoreCase)) SystemRenames[key]=value;
+        SystemRenames[old]=value; systemList.Items.Clear(); systemList.Items.AddRange(Systems.Cast<object>().ToArray()); systemList.SelectedItem=value; systemName.Clear();
+    }
+    private void RemoveSystem(object sender, EventArgs e)
+    {
+        string value=systemList.SelectedItem as string; if(value==null)return;
+        if(entries.Any(x=>String.Equals(x.system,value,StringComparison.CurrentCultureIgnoreCase))){MessageBox.Show("Bu sistem kayıtlar tarafından kullanılıyor. Önce ilgili kayıtları başka bir sisteme taşıyın.","Sistem kaldırılamadı",MessageBoxButtons.OK,MessageBoxIcon.Information);return;}
+        Systems.RemoveAll(x=>String.Equals(x,value,StringComparison.CurrentCultureIgnoreCase)); systemList.Items.Remove(value); systemName.Clear();
+    }
+    private void AddSection(object sender, EventArgs e)
+    {
+        string value=CleanName(sectionName); if(value==null)return;
+        if(Sections.Any(x=>String.Equals(x.name,value,StringComparison.CurrentCultureIgnoreCase))){MessageBox.Show("Bu bölüm adı zaten var.","TugbayPass",MessageBoxButtons.OK,MessageBoxIcon.Information);return;}
+        string id=String.Equals(value,"PC",StringComparison.CurrentCultureIgnoreCase)&&!Sections.Any(x=>x.id=="pc")?"pc":Guid.NewGuid().ToString("N");
+        Sections.Add(new VaultSection{id=id,name=value}); sectionList.Items.Clear(); sectionList.Items.AddRange(Sections.Cast<object>().ToArray()); sectionList.SelectedIndex=sectionList.Items.Count-1; sectionName.Clear();
+    }
+    private void RenameSection(object sender, EventArgs e)
+    {
+        VaultSection selected=sectionList.SelectedItem as VaultSection; string value=CleanName(sectionName); if(selected==null||value==null)return;
+        if(Sections.Any(x=>x!=selected&&String.Equals(x.name,value,StringComparison.CurrentCultureIgnoreCase))){MessageBox.Show("Bu bölüm adı zaten var.","TugbayPass",MessageBoxButtons.OK,MessageBoxIcon.Information);return;}
+        selected.name=value; sectionList.Items[sectionList.SelectedIndex]=selected; sectionList.SelectedItem=selected; sectionName.Clear();
+    }
+    private void RemoveSection(object sender, EventArgs e)
+    {
+        VaultSection selected=sectionList.SelectedItem as VaultSection; if(selected==null)return;
+        if(Sections.Count<=1){MessageBox.Show("En az bir bölüm kalmalıdır.","Bölüm kaldırılamadı",MessageBoxButtons.OK,MessageBoxIcon.Information);return;}
+        if(entries.Any(x=>String.Equals(x.sectionId,selected.id,StringComparison.OrdinalIgnoreCase))){MessageBox.Show("Bu bölüm kayıtlar tarafından kullanılıyor. Önce kayıtları başka bir bölüme taşıyın.","Bölüm kaldırılamadı",MessageBoxButtons.OK,MessageBoxIcon.Information);return;}
+        Sections.Remove(selected); sectionList.Items.Remove(selected); sectionName.Clear();
     }
 }
 
