@@ -171,7 +171,7 @@ internal static class UITheme
 
 internal sealed class KasamForm : Form
 {
-    private const string AppVersion = "1.3.2";
+    private const string AppVersion = "1.3.3";
     private const string UpdateInfoUrl = "https://raw.githubusercontent.com/mertdmrc8/TugbayPass/main/update.json";
     private static readonly Color Green = Color.FromArgb(65, 91, 220);
     private static readonly Color Ink = UITheme.LightText;
@@ -187,7 +187,9 @@ internal sealed class KasamForm : Form
     private bool startupUpdateChecked;
     private UpdateInfo pendingAutomaticUpdate;
     private TextBox searchBox, usernameBox, passwordBox, urlBox, notesBox, systemBox;
-    private ComboBox systemFilterBox, recentVaultBox;
+    private CheckedListBox systemFilterList;
+    private ComboBox recentVaultBox;
+    private bool updatingSystemFilter;
     private List<string> recentVaults = new List<string>();
     private List<PinVaultRecord> pinVaults = new List<PinVaultRecord>();
     private ListBox entryList;
@@ -219,7 +221,7 @@ internal sealed class KasamForm : Form
 
     private Button MakeButton(string text, int width, bool primary)
     {
-        Button b = new Button(); b.Text = text; b.Width = width; b.Height = 40; b.FlatStyle = FlatStyle.Flat; b.Cursor = Cursors.Hand; b.Tag = primary ? "primary" : "button";
+        Button b = new Button(); b.Text = text; b.Width = width; b.Height = 40; b.FlatStyle = FlatStyle.Flat; b.UseVisualStyleBackColor = false; b.TextAlign = ContentAlignment.MiddleCenter; b.AutoEllipsis = true; b.Cursor = Cursors.Hand; b.Tag = primary ? "primary" : "button";
         b.FlatAppearance.BorderColor = Color.FromArgb(218, 226, 229); b.FlatAppearance.BorderSize = primary ? 0 : 1;
         b.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(0, 121, 107) : Color.FromArgb(235, 242, 243);
         b.FlatAppearance.MouseDownBackColor = Color.FromArgb(0, 77, 64); b.BackColor = primary ? Green : Color.White;
@@ -534,20 +536,20 @@ internal sealed class KasamForm : Form
         Label version = MakeLabel("ŞİFRE KASASI  ·  v" + AppVersion, 9, true, Muted); version.Location = new Point(62, 45); sidebar.Controls.Add(version);
         Button nav = MakeButton("▦   Genel görünüm", 174, true); nav.Height = 42; nav.Location = new Point(14, 100); sidebar.Controls.Add(nav);
         Label systemsLabel = MakeLabel("SİSTEMLER", 9, true, Muted); systemsLabel.Location = new Point(18, 164); sidebar.Controls.Add(systemsLabel);
-        systemFilterBox = new ComboBox(); systemFilterBox.Location = new Point(14, 190); systemFilterBox.Size = new Size(174, 36); systemFilterBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; systemFilterBox.DropDownStyle = ComboBoxStyle.DropDownList; systemFilterBox.Font = new Font("Segoe UI", 10); sidebar.Controls.Add(systemFilterBox);
-        Label vaultsLabel = MakeLabel("SON KULLANILAN KASALAR", 9, true, Muted); vaultsLabel.Location = new Point(18, 258); sidebar.Controls.Add(vaultsLabel);
-        recentVaultBox = new ComboBox(); recentVaultBox.Location = new Point(14, 284); recentVaultBox.Size = new Size(174, 34); recentVaultBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; recentVaultBox.DropDownStyle = ComboBoxStyle.DropDownList; recentVaultBox.Font = new Font("Segoe UI", 9); sidebar.Controls.Add(recentVaultBox);
-        Button openRecent = MakeButton("Seçili kasayı aç", 174, false); openRecent.Height = 38; openRecent.Location = new Point(14, 328); sidebar.Controls.Add(openRecent);
-        Label pinLabel = MakeLabel("HIZLI AÇILIŞ", 9, true, Muted); pinLabel.Location = new Point(18, 398); sidebar.Controls.Add(pinLabel);
-        Label pinDescription = MakeLabel("Bu Windows hesabında 4 haneli PIN kullanın.", 9, false, Muted); pinDescription.Location = new Point(18, 424); pinDescription.Size = new Size(164, 48); pinDescription.AutoSize = false; sidebar.Controls.Add(pinDescription);
-        Button pinSidebarButton = MakeButton("PIN ayarları", 174, false); pinSidebarButton.Height = 38; pinSidebarButton.Location = new Point(14, 480); sidebar.Controls.Add(pinSidebarButton);
+        systemFilterList = new CheckedListBox(); systemFilterList.Location = new Point(14, 190); systemFilterList.Size = new Size(174, 134); systemFilterList.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; systemFilterList.CheckOnClick = true; systemFilterList.IntegralHeight = false; systemFilterList.BorderStyle = BorderStyle.FixedSingle; systemFilterList.ItemHeight = 25; systemFilterList.Font = new Font("Segoe UI", 9); sidebar.Controls.Add(systemFilterList);
+        Label vaultsLabel = MakeLabel("SON KULLANILAN KASALAR", 9, true, Muted); vaultsLabel.Location = new Point(18, 340); sidebar.Controls.Add(vaultsLabel);
+        recentVaultBox = new ComboBox(); recentVaultBox.Location = new Point(14, 366); recentVaultBox.Size = new Size(174, 34); recentVaultBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; recentVaultBox.DropDownStyle = ComboBoxStyle.DropDownList; recentVaultBox.Font = new Font("Segoe UI", 9); sidebar.Controls.Add(recentVaultBox);
+        Button openRecent = MakeButton("Seçili kasayı aç", 174, false); openRecent.Height = 38; openRecent.Location = new Point(14, 410); sidebar.Controls.Add(openRecent);
+        Label pinLabel = MakeLabel("HIZLI AÇILIŞ", 9, true, Muted); pinLabel.Location = new Point(18, 470); sidebar.Controls.Add(pinLabel);
+        Label pinDescription = MakeLabel("Bu Windows hesabında 4 haneli PIN kullanın.", 9, false, Muted); pinDescription.Location = new Point(18, 496); pinDescription.Size = new Size(164, 48); pinDescription.AutoSize = false; sidebar.Controls.Add(pinDescription);
+        Button pinSidebarButton = MakeButton("PIN ayarları", 174, false); pinSidebarButton.Height = 38; pinSidebarButton.Location = new Point(14, 552); sidebar.Controls.Add(pinSidebarButton);
 
         Panel header = new Panel { Dock = DockStyle.Top, Height = 124, BackColor = UITheme.Surface, Tag = "surface" }; main.Controls.Add(header);
         header.Paint += delegate(object sender, PaintEventArgs e) { using (Pen pen = new Pen(UITheme.Dark ? Color.FromArgb(51, 62, 85) : Color.FromArgb(224, 229, 239))) e.Graphics.DrawLine(pen, 0, header.Height - 1, header.Width, header.Height - 1); };
         Label heading = MakeLabel("Şifre kasası", 19, true, Ink); heading.Location = new Point(22, 15); header.Controls.Add(heading);
         Label headingSub = MakeLabel("Hesaplarını görüntüle ve düzenle", 9, false, Muted); headingSub.Location = new Point(24, 46); header.Controls.Add(headingSub);
         FlowLayoutPanel actions = new FlowLayoutPanel { Location = new Point(14, 72), Size = new Size(main.ClientSize.Width - 28, 44), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoScroll = true, BackColor = UITheme.Surface, Tag = "surface", Padding = new Padding(0) }; header.Controls.Add(actions);
-        Button add = MakeButton("+ Yeni kayıt", 112, true), save = MakeButton("Kaydet", 92, false), changeMaster = MakeButton("Ana parola", 94, false), pinButton = MakeButton("PIN ayarı", 84, false), chooseVault = MakeButton("Kasa seç", 80, false), lockButton = MakeButton("Kilitle", 72, false), updateButton = MakeButton("Güncellemeler", 116, false);
+        Button add = MakeButton("+ Yeni kayıt", 112, true), save = MakeButton("Kaydet", 92, false), changeMaster = MakeButton("Ana parola", 94, false), pinButton = MakeButton("PIN ayarı", 84, false), chooseVault = MakeButton("Kasa seç", 80, false), lockButton = MakeButton("Kilitle", 72, false), updateButton = MakeButton("Güncellemeleri denetle", 154, false);
         Button themeButton = MakeButton(darkTheme ? "☀ Açık tema" : "☾ Koyu tema", 108, false); themeButton.Location = new Point(0, 17); themeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right; header.Controls.Add(themeButton);
         header.Resize += delegate { themeButton.Left = Math.Max(12, header.ClientSize.Width - themeButton.Width - 18); };
         actions.Controls.AddRange(new Control[] { add, save, changeMaster, pinButton, chooseVault, lockButton, updateButton });
@@ -572,8 +574,8 @@ internal sealed class KasamForm : Form
         AddCopyDetailField(details, "Parola", out passwordBox, out copyButton, true);
         AddCopyDetailField(details, "Web adresi", out urlBox, out copyUrlButton);
         Label notesLabel = MakeLabel("Notlar", 9, true, Muted); notesLabel.Location = new Point(20, 326); split.Panel2.Controls.Add(notesLabel);
-        copyNotesButton = MakeButton("Kopyala", 88, false); copyNotesButton.Location = new Point(split.Panel2.Width - 108, 318); copyNotesButton.Anchor = AnchorStyles.Top | AnchorStyles.Right; split.Panel2.Controls.Add(copyNotesButton);
-        notesBox = new TextBox(); notesBox.Location = new Point(18, 354); notesBox.Size = new Size(split.Panel2.Width - 36, split.Panel2.Height - 372); notesBox.Multiline = true; notesBox.ReadOnly = true; notesBox.ScrollBars = ScrollBars.Vertical; notesBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right; notesBox.Font = new Font("Segoe UI", 10); split.Panel2.Controls.Add(notesBox);
+        copyNotesButton = MakeButton("Kopyala", 88, false); copyNotesButton.Height = 34; copyNotesButton.Location = new Point(split.Panel2.Width - 106, 320); copyNotesButton.Anchor = AnchorStyles.Top | AnchorStyles.Right; split.Panel2.Controls.Add(copyNotesButton);
+        notesBox = new TextBox(); notesBox.Location = new Point(18, 362); notesBox.Size = new Size(split.Panel2.Width - 36, split.Panel2.Height - 380); notesBox.Multiline = true; notesBox.ReadOnly = true; notesBox.ScrollBars = ScrollBars.Vertical; notesBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right; notesBox.Font = new Font("Segoe UI", 10); split.Panel2.Controls.Add(notesBox);
         Label footer = MakeLabel("TugbayPass  ·  v" + AppVersion + "  ·  Kasanız bu bilgisayarda şifreli saklanır.", 9, false, Muted); footer.Location = new Point(18, main.ClientSize.Height - 30); footer.Anchor = AnchorStyles.Bottom | AnchorStyles.Left; main.Controls.Add(footer);
         add.Click += delegate { AddEntry(); };
         save.Click += delegate { SaveVault(); };
@@ -591,7 +593,7 @@ internal sealed class KasamForm : Form
         searchBox.LostFocus += delegate { searchHint.Visible = String.IsNullOrEmpty(searchBox.Text); };
         searchBox.TextChanged += delegate { searchHint.Visible = !searchBox.Focused && String.IsNullOrEmpty(searchBox.Text); };
         searchBox.TextChanged += delegate { RefreshEntries(null); };
-        systemFilterBox.SelectedIndexChanged += delegate { RefreshEntries(null); };
+        systemFilterList.ItemCheck += OnSystemFilterItemCheck;
         entryList.SelectedIndexChanged += delegate { UpdateDetails(); };
         entryList.DrawItem += DrawEntryItem;
         editButton.Click += delegate { EditEntry(); };
@@ -603,7 +605,7 @@ internal sealed class KasamForm : Form
         copyUsernameButton.Click += delegate { CopyField(usernameBox.Text, "Kullanıcı adı / e-posta"); };
         copyUrlButton.Click += delegate { CopyField(urlBox.Text, "Web adresi"); };
         copyNotesButton.Click += delegate { CopyField(notesBox.Text, "Notlar"); };
-        split.Panel2.Resize += delegate { int panelWidth = split.Panel2.ClientSize.Width; details.Width = panelWidth - 36; notesBox.Width = panelWidth - 36; copyNotesButton.Left = panelWidth - 108; titleLabel.Width = Math.Max(80, panelWidth - 285); copyTitleButton.Left = panelWidth - 250; editButton.Left = panelWidth - 168; deleteButton.Left = panelWidth - 82; };
+        split.Panel2.Resize += delegate { int panelWidth = split.Panel2.ClientSize.Width; details.Width = panelWidth - 36; notesBox.Width = panelWidth - 36; copyNotesButton.Left = panelWidth - 106; titleLabel.Width = Math.Max(80, panelWidth - 285); copyTitleButton.Left = panelWidth - 250; editButton.Left = panelWidth - 168; deleteButton.Left = panelWidth - 82; };
         main.Resize += delegate { actions.Width = main.ClientSize.Width - 28; statusStrip.Width = main.ClientSize.Width - 32; fileLabel.Width = Math.Max(80, statusStrip.Width - 230); split.Width = main.ClientSize.Width - 32; split.Height = main.ClientSize.Height - 204; };
         UITheme.Apply(this);
         UpdateStatus(); RefreshSystemFilter(null); RefreshRecentVaults(); RefreshEntries(null); UpdateDetails();
@@ -644,10 +646,10 @@ internal sealed class KasamForm : Form
         box = new TextBox { Location = new Point(4, 22), Size = new Size(table.ClientSize.Width - 132, 27), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, ReadOnly = true, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 10), BackColor = UITheme.Input };
         if (password) box.UseSystemPasswordChar = true;
         row.Controls.Add(box);
-        copy = MakeButton("Kopyala", 88, false); copy.Height = 30; copy.Location = new Point(row.Width - 96, 20); copy.Anchor = AnchorStyles.Top | AnchorStyles.Right; row.Controls.Add(copy);
+        copy = MakeButton("Kopyala", 88, false); copy.Height = 32; copy.Location = new Point(row.Width - 96, 20); copy.Anchor = AnchorStyles.Top | AnchorStyles.Right; row.Controls.Add(copy);
         if (password)
         {
-            revealButton = MakeButton("Göster", 76, false); revealButton.Height = 30; revealButton.Location = new Point(row.Width - 180, 20); revealButton.Anchor = AnchorStyles.Top | AnchorStyles.Right; row.Controls.Add(revealButton);
+            revealButton = MakeButton("Göster", 76, false); revealButton.Height = 32; revealButton.Location = new Point(row.Width - 180, 20); revealButton.Anchor = AnchorStyles.Top | AnchorStyles.Right; row.Controls.Add(revealButton);
             box.Width = table.ClientSize.Width - 220;
         }
         TextBox resizeBox = box; Button resizeCopy = copy; Button resizeReveal = password ? revealButton : null;
@@ -682,11 +684,15 @@ internal sealed class KasamForm : Form
     {
         if (entryList == null) return;
         if (preferredId == null && entryList.SelectedItem is VaultEntry) preferredId = ((VaultEntry)entryList.SelectedItem).id;
-        string q = (searchBox.Text ?? "").Trim(); string selectedSystem = systemFilterBox.SelectedItem as string;
+        string q = (searchBox.Text ?? "").Trim();
+        HashSet<string> selectedSystems = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
+        if (systemFilterList != null)
+            for (int i = 1; i < systemFilterList.Items.Count; i++) if (systemFilterList.GetItemChecked(i)) selectedSystems.Add(systemFilterList.Items[i].ToString());
+        bool allSystems = systemFilterList == null || systemFilterList.GetItemChecked(0) || selectedSystems.Count == 0;
         entryList.BeginUpdate(); entryList.Items.Clear();
         foreach (VaultEntry e in entries)
         {
-            bool matchesSystem = String.IsNullOrEmpty(selectedSystem) || selectedSystem == "Tüm sistemler" || String.Equals(e.system, selectedSystem, StringComparison.CurrentCultureIgnoreCase);
+            bool matchesSystem = allSystems || selectedSystems.Contains(e.system ?? "");
             bool matchesSearch = q.Length == 0 || (e.system + " " + e.title + " " + e.username + " " + e.password + " " + e.url + " " + e.notes).IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0;
             if (matchesSystem && matchesSearch) entryList.Items.Add(e);
         }
@@ -776,12 +782,48 @@ internal sealed class KasamForm : Form
 
     private void RefreshSystemFilter(string selectSystem)
     {
-        if (systemFilterBox == null) return;
-        string previous = selectSystem ?? systemFilterBox.SelectedItem as string;
-        systemFilterBox.BeginUpdate(); systemFilterBox.Items.Clear(); systemFilterBox.Items.Add("Tüm sistemler");
-        foreach (string system in GetSystems()) systemFilterBox.Items.Add(system);
-        int index = previous == null ? 0 : systemFilterBox.Items.IndexOf(previous);
-        systemFilterBox.SelectedIndex = index >= 0 ? index : 0; systemFilterBox.EndUpdate();
+        if (systemFilterList == null) return;
+        List<string> previous = new List<string>();
+        if (selectSystem == null)
+            for (int i = 1; i < systemFilterList.Items.Count; i++) if (systemFilterList.GetItemChecked(i)) previous.Add(systemFilterList.Items[i].ToString());
+        updatingSystemFilter = true;
+        systemFilterList.BeginUpdate(); systemFilterList.Items.Clear(); systemFilterList.Items.Add("Tüm sistemler");
+        foreach (string system in GetSystems()) systemFilterList.Items.Add(system);
+        systemFilterList.SetItemChecked(0, selectSystem == null && previous.Count == 0);
+        for (int i = 1; i < systemFilterList.Items.Count; i++)
+        {
+            string system = systemFilterList.Items[i].ToString();
+            bool selected = selectSystem != null
+                ? String.Equals(system, selectSystem, StringComparison.CurrentCultureIgnoreCase)
+                : previous.Contains(system, StringComparer.CurrentCultureIgnoreCase);
+            if (selected) systemFilterList.SetItemChecked(i, true);
+        }
+        if (selectSystem != null && systemFilterList.CheckedItems.Count == 0) systemFilterList.SetItemChecked(0, true);
+        systemFilterList.EndUpdate(); updatingSystemFilter = false;
+    }
+
+    private void OnSystemFilterItemCheck(object sender, ItemCheckEventArgs e)
+    {
+        if (updatingSystemFilter || !IsHandleCreated) return;
+        BeginInvoke((MethodInvoker)delegate
+        {
+            if (IsDisposed || systemFilterList == null) return;
+            updatingSystemFilter = true;
+            if (e.Index == 0 && e.NewValue == CheckState.Checked)
+            {
+                for (int i = 1; i < systemFilterList.Items.Count; i++) systemFilterList.SetItemChecked(i, false);
+            }
+            else if (e.Index > 0 && e.NewValue == CheckState.Checked)
+                systemFilterList.SetItemChecked(0, false);
+            else if (e.Index > 0 && e.NewValue == CheckState.Unchecked)
+            {
+                bool anySystemSelected = false;
+                for (int i = 1; i < systemFilterList.Items.Count; i++) if (i != e.Index && systemFilterList.GetItemChecked(i)) { anySystemSelected = true; break; }
+                if (!anySystemSelected) systemFilterList.SetItemChecked(0, true);
+            }
+            updatingSystemFilter = false;
+            RefreshEntries(null);
+        });
     }
 
     private VaultEntry SelectedEntry() { return entryList != null ? entryList.SelectedItem as VaultEntry : null; }
@@ -793,11 +835,7 @@ internal sealed class KasamForm : Form
         titleLabel.Text = has ? e.title : ""; systemBox.Text = has ? e.system : ""; usernameBox.Text = has ? e.username : ""; passwordBox.Text = has ? e.password : ""; urlBox.Text = has ? e.url : ""; notesBox.Text = has ? e.notes : "";
         revealed = has; passwordBox.UseSystemPasswordChar = !revealed; if (revealButton != null) revealButton.Text = revealed ? "Gizle" : "Göster";
         editButton.Enabled = deleteButton.Enabled = revealButton.Enabled = copyButton.Enabled = has;
-        copyTitleButton.Enabled = has && !String.IsNullOrWhiteSpace(e.title);
-        copySystemButton.Enabled = has && !String.IsNullOrWhiteSpace(e.system);
-        copyUsernameButton.Enabled = has && !String.IsNullOrWhiteSpace(e.username);
-        copyUrlButton.Enabled = has && !String.IsNullOrWhiteSpace(e.url);
-        copyNotesButton.Enabled = has && !String.IsNullOrWhiteSpace(e.notes);
+        copyTitleButton.Enabled = copySystemButton.Enabled = copyUsernameButton.Enabled = copyUrlButton.Enabled = copyNotesButton.Enabled = true;
     }
 
     private void AddEntry()
@@ -812,7 +850,7 @@ internal sealed class KasamForm : Form
     private void DeleteEntry()
     {
         VaultEntry selected = SelectedEntry(); if (selected == null) return;
-        if (MessageBox.Show("“" + selected.title + "” kaydı silinsin mi?", "Kaydı sil", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) { entries.RemoveAll(x => x.id == selected.id); dirty = true; UpdateStatus(); RefreshEntries(null); }
+        if (MessageBox.Show("“" + selected.title + "” kaydı silinsin mi?", "Kaydı sil", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) { entries.RemoveAll(x => x.id == selected.id); dirty = true; UpdateStatus(); RefreshSystemFilter(null); RefreshEntries(null); }
     }
     private void ToggleReveal()
     {
@@ -826,7 +864,7 @@ internal sealed class KasamForm : Form
 
     private void CopyField(string value, string caption)
     {
-        if (String.IsNullOrWhiteSpace(value)) return;
+        if (String.IsNullOrWhiteSpace(value)) { if (statusLabel != null) statusLabel.Text = caption + " alanı boş"; return; }
         try
         {
             Clipboard.SetText(value);

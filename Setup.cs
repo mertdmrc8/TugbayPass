@@ -85,7 +85,7 @@ internal sealed class SetupForm : Form
             if (desktop.Checked) CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "TugbayPass.lnk"), Path.Combine(target, "Kasam.exe"), target, Path.Combine(target, "Kasam.ico"));
             using (RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\Kasam"))
             {
-                key.SetValue("DisplayName", "TugbayPass"); key.SetValue("DisplayVersion", "1.3.2"); key.SetValue("Publisher", "TugbayPass"); key.SetValue("InstallLocation", target); key.SetValue("DisplayIcon", Path.Combine(target, "Kasam.ico"));
+                key.SetValue("DisplayName", "TugbayPass"); key.SetValue("DisplayVersion", "1.3.3"); key.SetValue("Publisher", "TugbayPass"); key.SetValue("InstallLocation", target); key.SetValue("DisplayIcon", Path.Combine(target, "Kasam.ico"));
                 key.SetValue("UninstallString", SetupProgram.Quote(uninstallExe) + " /uninstall"); key.SetValue("NoModify", 1, RegistryValueKind.DWord); key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
             }
             if (MessageBox.Show("TugbayPass kuruldu. Şimdi başlatılsın mı?", "TugbayPass Kurulumu", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)

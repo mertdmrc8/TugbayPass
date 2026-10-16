@@ -13,14 +13,14 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-"%CSC%" /nologo /target:winexe /out:"%~dp0TugbayPass-Setup-1.3.2.exe" /win32icon:"%~dp0Kasam.ico" /resource:"%~dp0Kasam.exe",Kasam.exe /resource:"%~dp0Kasam.ico",Kasam.ico /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "%~dp0Setup.cs"
+"%CSC%" /nologo /target:winexe /out:"%~dp0TugbayPass-Setup-1.3.3.exe" /win32icon:"%~dp0Kasam.ico" /resource:"%~dp0Kasam.exe",Kasam.exe /resource:"%~dp0Kasam.ico",Kasam.ico /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "%~dp0Setup.cs"
 if errorlevel 1 (
   echo Kurulum dosyasi olusturulamadi.
   pause
   exit /b 1
 )
 if not exist "%~dp0dist" mkdir "%~dp0dist"
-copy /y "%~dp0TugbayPass-Setup-1.3.2.exe" "%~dp0dist\TugbayPass-Setup-1.3.2.exe" >nul
+copy /y "%~dp0TugbayPass-Setup-1.3.3.exe" "%~dp0dist\TugbayPass-Setup-1.3.3.exe" >nul
 copy /y "%~dp0update.json" "%~dp0dist\update.json" >nul
-echo TugbayPass v1.3.2 uygulamasi ve secilebilir kurulum konumuna sahip setup olusturuldu.
+echo TugbayPass v1.3.3 uygulamasi ve secilebilir kurulum konumuna sahip setup olusturuldu.
 pause
