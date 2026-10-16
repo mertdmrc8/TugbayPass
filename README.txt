@@ -1,5 +1,5 @@
 KASAM — Windows masaüstü şifre kasası
-Sürüm: 1.1
+Sürüm: 1.2.0
 
 BAŞLATMA
 Kasam.exe dosyasına çift tıklayın. Windows'un yerleşik .NET Framework derleyicisi eksikse Build-Kasam.cmd ile uygulamayı yeniden oluşturabilirsiniz. İndirme veya ek paket gerekmez. Uygulama simgesi Kasam.ico dosyasıdır; derleme sırasında EXE'ye eklenir.
@@ -11,6 +11,13 @@ KULLANIM
 Tek bir ana kasa kullanın. Her kayıt eklerken ait olduğu sistemi seçin veya yeni bir sistem adı yazıp “Listeye ekle” düğmesine basın. Sol taraftaki “Sistem” listesinden Google, banka veya eklediğiniz başka bir sisteme geçin; hesap listesi yalnızca seçtiğiniz sistemi gösterir. “Tüm sistemler” seçeneği bütün kayıtları gösterir. Sistemler arasında geçmek için yeni kasa açmanız gerekmez.
 
 Sol listedeki hesaplar çerçeveli kartlar halinde gösterilir. Bir karta tıklayınca kullanıcı adı ve parola ayrıntılarda görünür. “Gizle” düğmesi parolayı tekrar maskeler. Sistem, hesap adı, kullanıcı adı/e-posta, parola, web adresi ve notlar alanlarının yanındaki “Kopyala” düğmeleri ilgili bilgiyi panoya alır.
+
+Sol taraftaki arama alanında hesap adı, sistem, kullanıcı adı/e-posta, parola, web adresi veya notlarda arama yapabilirsiniz.
+
+GÜNCELLEME VE KURULUM
+Üst araç çubuğunun altındaki “Güncellemeleri denetle” düğmesi herkese açık TugbayPass deposundaki sürüm bilgisini kontrol eder. Yeni sürüm varsa kurulum dosyasını indirip başlatmayı teklif eder. Güncelleme otomatik ve sessiz kurulmaz; setup penceresinde kurulum konumunu seçebilirsiniz.
+
+Kasam-Setup-1.2.0.exe tek dosyalı kurulum aracıdır. Varsayılan konum %LOCALAPPDATA%\Programs\Kasam'dır; “Gözat” düğmesiyle farklı klasör seçilebilir. Kurulum başlat menüsü ve isteğe bağlı masaüstü kısayolu oluşturur. Kaldırma işlemi Windows'un “Uygulamalar ve özellikler” bölümünden yapılabilir. Kasa dosyalarınız kurulum klasöründen ayrı tutulur.
 
 GÖRÜNÜM
 Arayüz, Kasam'ın yeşil tonlarıyla Material tasarım yaklaşımına göre güncellendi. Üst araç çubuğu ve kayıt ayrıntıları pencere genişliğine göre boyutlanır. Uygulama simgesi ve arayüzdeki marka işareti aynı kilit logosunu kullanır.
@@ -28,4 +35,3 @@ Kayıtlar AES-256-CBC ile şifrelenir ve HMAC-SHA-256 ile doğrulanır. Anahtar,
 
 UYGUNLUK
 Windows 10 veya 11 ve yerleşik .NET Framework 4.7.2 ya da daha yenisi gerekir. Uygulama yalnızca Windows içindir. Tarayıcı uzantısı içermez.
-

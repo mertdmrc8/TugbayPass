@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Net;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -116,6 +119,8 @@ internal static class VaultCrypto
 
 internal sealed class KasamForm : Form
 {
+    private const string AppVersion = "1.2.0";
+    private const string UpdateInfoUrl = "https://raw.githubusercontent.com/mertdmrc8/TugbayPass/main/update.json";
     private static readonly Color Green = Color.FromArgb(0, 105, 92);
     private static readonly Color Ink = Color.FromArgb(26, 38, 42);
     private static readonly Color Muted = Color.FromArgb(96, 110, 116);
@@ -440,11 +445,13 @@ internal sealed class KasamForm : Form
         actions.Controls.AddRange(new Control[] { add, save, changeMaster, pinButton, chooseVault, lockButton }); header.Controls.Add(actions); actions.Location = new Point(header.Width - actions.Width - 12, 13);
         header.Resize += delegate { actions.Location = new Point(Math.Max(160, header.Width - actions.Width - 12), 13); };
         statusLabel = MakeLabel("", 9, false, Green); statusLabel.Location = new Point(24, 86); body.Controls.Add(statusLabel);
-        fileLabel = MakeLabel("", 9, false, Muted); fileLabel.TextAlign = ContentAlignment.TopRight; fileLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right; fileLabel.Location = new Point(610, 86); fileLabel.Size = new Size(ClientSize.Width - 635, 22); body.Controls.Add(fileLabel);
+        fileLabel = MakeLabel("", 9, false, Muted); fileLabel.TextAlign = ContentAlignment.TopRight; fileLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right; fileLabel.Location = new Point(350, 86); fileLabel.Size = new Size(ClientSize.Width - 500, 22); body.Controls.Add(fileLabel);
+        Button updateButton = MakeButton("Güncellemeleri denetle", 150, false); updateButton.Height = 32; updateButton.Location = new Point(body.ClientSize.Width - 172, 80); updateButton.Anchor = AnchorStyles.Top | AnchorStyles.Right; body.Controls.Add(updateButton);
         SplitContainer split = new SplitContainer(); split.Location = new Point(20, 111); split.Size = new Size(ClientSize.Width - 40, ClientSize.Height - 165); split.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right; split.SplitterDistance = 360; split.Panel1MinSize = 250; split.Panel2MinSize = 390; split.BackColor = Canvas; body.Controls.Add(split);
         Label systemFilterLabel = MakeLabel("Sistem", 9, false, Muted); systemFilterLabel.Location = new Point(10, 9); split.Panel1.Controls.Add(systemFilterLabel);
         systemFilterBox = new ComboBox(); systemFilterBox.Location = new Point(10, 30); systemFilterBox.Size = new Size(split.Panel1.Width - 20, 32); systemFilterBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; systemFilterBox.DropDownStyle = ComboBoxStyle.DropDownList; systemFilterBox.Font = new Font("Segoe UI", 10); split.Panel1.Controls.Add(systemFilterBox);
         searchBox = new TextBox(); searchBox.Location = new Point(10, 72); searchBox.Size = new Size(split.Panel1.Width - 95, 32); searchBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; searchBox.Font = new Font("Segoe UI", 10); split.Panel1.Controls.Add(searchBox);
+        Label searchHint = MakeLabel("Hesap veya parola ara", 9, false, Muted); searchHint.Location = new Point(17, 79); searchHint.Cursor = Cursors.IBeam; split.Panel1.Controls.Add(searchHint); searchHint.BringToFront();
         countLabel = MakeLabel("0 kayıt", 9, false, Muted); countLabel.Location = new Point(split.Panel1.Width - 78, 80); countLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right; split.Panel1.Controls.Add(countLabel);
         entryList = new ListBox(); entryList.Location = new Point(6, 118); entryList.Size = new Size(split.Panel1.Width - 12, split.Panel1.Height - 128); entryList.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right; entryList.IntegralHeight = false; entryList.DrawMode = DrawMode.OwnerDrawFixed; entryList.ItemHeight = 66; entryList.BorderStyle = BorderStyle.None; entryList.Font = new Font("Segoe UI", 10, FontStyle.Bold); entryList.BackColor = Canvas; split.Panel1.Controls.Add(entryList);
         titleLabel = MakeLabel("", 16, true, Ink); titleLabel.Location = new Point(18, 22); titleLabel.Size = new Size(Math.Max(80, split.Panel2.Width - 285), 36); titleLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right; titleLabel.AutoEllipsis = true; split.Panel2.Controls.Add(titleLabel);
@@ -467,6 +474,11 @@ internal sealed class KasamForm : Form
         pinButton.Click += delegate { ConfigureQuickPin(); };
         chooseVault.Click += delegate { ChooseAnotherVault(); };
         lockButton.Click += delegate { LockVault(); };
+        updateButton.Click += delegate { CheckForUpdates(updateButton); };
+        searchHint.Click += delegate { searchBox.Focus(); };
+        searchBox.GotFocus += delegate { searchHint.Visible = false; };
+        searchBox.LostFocus += delegate { searchHint.Visible = String.IsNullOrEmpty(searchBox.Text); };
+        searchBox.TextChanged += delegate { searchHint.Visible = !searchBox.Focused && String.IsNullOrEmpty(searchBox.Text); };
         searchBox.TextChanged += delegate { RefreshEntries(null); };
         systemFilterBox.SelectedIndexChanged += delegate { RefreshEntries(null); };
         entryList.SelectedIndexChanged += delegate { UpdateDetails(); };
@@ -535,12 +547,62 @@ internal sealed class KasamForm : Form
         foreach (VaultEntry e in entries)
         {
             bool matchesSystem = String.IsNullOrEmpty(selectedSystem) || selectedSystem == "Tüm sistemler" || String.Equals(e.system, selectedSystem, StringComparison.CurrentCultureIgnoreCase);
-            bool matchesSearch = q.Length == 0 || (e.title + " " + e.username + " " + e.url + " " + e.notes).IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0;
+            bool matchesSearch = q.Length == 0 || (e.system + " " + e.title + " " + e.username + " " + e.password + " " + e.url + " " + e.notes).IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0;
             if (matchesSystem && matchesSearch) entryList.Items.Add(e);
         }
         entryList.EndUpdate(); countLabel.Text = entries.Count + " kayıt";
         if (preferredId != null) for (int i = 0; i < entryList.Items.Count; i++) if (((VaultEntry)entryList.Items[i]).id == preferredId) { entryList.SelectedIndex = i; break; }
         UpdateDetails();
+    }
+
+    private sealed class UpdateInfo { public string version { get; set; } public string setupUrl { get; set; } }
+
+    private void CheckForUpdates(Button button)
+    {
+        button.Enabled = false; button.Text = "Denetleniyor…";
+        BackgroundWorker worker = new BackgroundWorker();
+        worker.DoWork += delegate(object sender, DoWorkEventArgs e)
+        {
+            ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(UpdateInfoUrl); request.Timeout = 12000; request.ReadWriteTimeout = 12000; request.UserAgent = "Kasam/" + AppVersion;
+            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+            using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+            {
+                JavaScriptSerializer json = new JavaScriptSerializer();
+                UpdateInfo info = json.Deserialize<UpdateInfo>(reader.ReadToEnd());
+                if (info == null || String.IsNullOrWhiteSpace(info.version) || String.IsNullOrWhiteSpace(info.setupUrl)) throw new InvalidDataException("Güncelleme bilgisi geçersiz.");
+                e.Result = info;
+            }
+        };
+        worker.RunWorkerCompleted += delegate(object sender, RunWorkerCompletedEventArgs e)
+        {
+            button.Enabled = true; button.Text = "Güncellemeleri denetle";
+            if (e.Error != null) { MessageBox.Show("Güncelleme denetlenemedi. İnternet bağlantınızı kontrol edin.\r\n\r\n" + e.Error.Message, "Kasam güncelleme", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            UpdateInfo info = (UpdateInfo)e.Result;
+            Version current, latest;
+            if (!Version.TryParse(AppVersion, out current) || !Version.TryParse(info.version, out latest)) { MessageBox.Show("Sürüm bilgisi okunamadı.", "Kasam", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (latest <= current) { MessageBox.Show("Kasam güncel. (" + AppVersion + ")", "Kasam güncelleme", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            if (MessageBox.Show("Yeni sürüm bulundu: " + latest + "\r\nKurulum dosyası indirilsin mi? Kurulum sırasında hedef klasörü seçebilirsiniz.", "Kasam güncelleme", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
+            DownloadUpdate(info.setupUrl, latest.ToString());
+        };
+        worker.RunWorkerAsync();
+    }
+
+    private void DownloadUpdate(string url, string version)
+    {
+        try
+        {
+            ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+            string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kasam", "Updates"); Directory.CreateDirectory(folder);
+            string target = Path.Combine(folder, "Kasam-Setup-" + version + ".exe");
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url); request.Timeout = 60000; request.ReadWriteTimeout = 60000; request.UserAgent = "Kasam/" + AppVersion;
+            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+            using (Stream source = response.GetResponseStream())
+            using (FileStream destination = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None)) source.CopyTo(destination);
+            if (new FileInfo(target).Length < 50000) throw new InvalidDataException("İndirilen kurulum dosyası eksik görünüyor.");
+            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+        }
+        catch (Exception ex) { MessageBox.Show("Güncelleme indirilemedi veya başlatılamadı.\r\n\r\n" + ex.Message, "Kasam güncelleme", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
     private List<string> GetSystems()
@@ -934,4 +996,3 @@ internal static class PasswordGenerator
         return new String(chars.ToArray());
     }
 }
-

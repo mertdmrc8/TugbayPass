@@ -13,6 +13,14 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo Kasam.exe olusturuldu. Simdi Kasam.exe dosyasina cift tiklayabilirsiniz.
+"%CSC%" /nologo /target:winexe /out:"%~dp0Kasam-Setup-1.2.0.exe" /win32icon:"%~dp0Kasam.ico" /resource:"%~dp0Kasam.exe",Kasam.exe /resource:"%~dp0Kasam.ico",Kasam.ico /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "%~dp0Setup.cs"
+if errorlevel 1 (
+  echo Kurulum dosyasi olusturulamadi.
+  pause
+  exit /b 1
+)
+if not exist "%~dp0dist" mkdir "%~dp0dist"
+copy /y "%~dp0Kasam-Setup-1.2.0.exe" "%~dp0dist\Kasam-Setup-1.2.0.exe" >nul
+copy /y "%~dp0update.json" "%~dp0dist\update.json" >nul
+echo Kasam.exe ve secilebilir kurulum konumuna sahip Kasam-Setup-1.2.0.exe olusturuldu.
 pause
-
